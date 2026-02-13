@@ -1,0 +1,39 @@
+# Increase PHP upload limits for file uploads
+# These settings override php.ini for this directory only
+
+# Maximum file upload size (20MB)
+php_value upload_max_filesize 20M
+
+# Maximum POST data size (25MB - should be larger than upload_max_filesize)
+php_value post_max_size 25M
+
+# Maximum execution time (5 minutes for large uploads)
+php_value max_execution_time 300
+
+# Maximum input time (5 minutes)
+php_value max_input_time 300
+
+# Memory limit (128MB)
+php_value memory_limit 128M
+
+<IfModule mod_rewrite.c>
+    <IfModule mod_negotiation.c>
+        Options -MultiViews -Indexes
+    </IfModule>
+
+    RewriteEngine On
+
+    # Handle Authorization Header
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+    # Redirect Trailing Slashes If Not A Folder...
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_URI} (.+)/$
+    RewriteRule ^ %1 [L,R=301]
+
+    # Send Requests To Front Controller...
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteRule ^ index.php [L]
+</IfModule>
