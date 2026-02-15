@@ -61,7 +61,7 @@ The `users` table is created in a single migration with:
 
 ---
 
-## Default Accounts (after fresh deploy)
+## Default Accounts 
 
 | Role | Email | Password |
 |------|-------|----------|
