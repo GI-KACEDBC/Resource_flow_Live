@@ -87,19 +87,10 @@ Deploy the `frontend/dist/` folder to your static host.
 
 ---
 
-## 2. Default Accounts
-
-| Role | Email | Password |
-|------|-------|----------|
-| **Super Admin** | `superadmin@resourceflow.com` | `svc_r3f70w-J3TM3ga` |
-| **Auditor** | `auditor@resourceflow.com` | `svc_r3f70w-J3TM3ga` |
-
-**⚠️ Change these passwords immediately after first login.**
-
+## 2. Key Accounts
 - **Super Admin** (admin role): Full application access – verification center, resource allocation, user management, financial reports, transparency log.
 - **Auditor**: Document verification, audit logs, NGO verification, valuation review.
 
----
 
 ## 3. Web Server Configuration
 
@@ -181,7 +172,6 @@ Options: `--fresh` (default), `--migrate` (migrations only), `--seed-only` (re-s
 - **30-day password expiry**: All users must change their password every 30 days. Expired passwords block login until changed.
 - Never commit `.env` files
 - Use HTTPS everywhere
-- Change Super Admin password after first login
 - Rotate `APP_KEY` and API keys if compromised
 - Restrict database access to the app server
 
