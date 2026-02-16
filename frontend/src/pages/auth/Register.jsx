@@ -14,6 +14,7 @@ const Register = () => {
     lastName: '',
     email: '',
     password: '',
+    passwordConfirmation: '',
     organization: '',
     phone: '',
     ghanaCard: '',
@@ -88,6 +89,14 @@ const Register = () => {
       alert('Please upload your Business Registration document.');
       return;
     }
+    if (formData.password !== formData.passwordConfirmation) {
+      alert('Password and confirmation do not match.');
+      return;
+    }
+    if (formData.password.length < 8) {
+      alert('Password must be at least 8 characters.');
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -95,7 +104,7 @@ const Register = () => {
         name: `${formData.firstName} ${formData.lastName}`,
         email: formData.email,
         password: formData.password,
-        password_confirmation: formData.password,
+        password_confirmation: formData.passwordConfirmation,
         role,
         organization: formData.organization || '',
         phone: formData.phone || '',
@@ -258,15 +267,28 @@ const Register = () => {
               className="w-full border p-2 rounded border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
           )}
-          <input
-            type="password"
-            name="password"
-            placeholder="Password"
-            value={formData.password}
-            onChange={handleChange}
-            className="w-full border p-2 rounded border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            required
-          />
+          <div className="grid grid-cols-2 gap-4">
+            <input
+              type="password"
+              name="password"
+              placeholder="Password"
+              value={formData.password}
+              onChange={handleChange}
+              className="w-full border p-2 rounded border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              required
+              minLength={8}
+            />
+            <input
+              type="password"
+              name="passwordConfirmation"
+              placeholder="Confirm Password"
+              value={formData.passwordConfirmation}
+              onChange={handleChange}
+              className="w-full border p-2 rounded border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              required
+              minLength={8}
+            />
+          </div>
 
           {/* Document Upload Section */}
           <div className="border-t border-slate-200 pt-6 mt-6">

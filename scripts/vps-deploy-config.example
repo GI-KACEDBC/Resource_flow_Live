@@ -1,0 +1,25 @@
+# ResourceFlow VPS Deployment Config
+# Copy to vps-deploy-config and fill in your values
+# Usage: source scripts/vps-deploy-config && ./scripts/vps-deploy.sh
+
+# VPS connection
+export VPS_HOST=187.77.99.219
+export VPS_USER=root
+export VPS_SSH_PORT=22
+
+# Domain (no https://187.77.99.219)
+export DOMAIN=yourdomain.com
+export API_DOMAIN=api.yourdomain.com
+
+# Database (created on VPS)
+export DB_PASSWORD=J3TrXS#o.1Host
+
+# Paystack (live keys)
+export PAYSTACK_PUBLIC_KEY=pk_live_xxxx
+export PAYSTACK_SECRET_KEY=sk_live_xxxxs
+
+# Optional: QoreID for Ghana Card verification
+export QOREID_SECRET_KEY=
+
+# Certbot email for SSL
+export CERTBOT_EMAIL=admin@yourdomain.com
