@@ -31,6 +31,7 @@ const Register = () => {
   const [useCapture, setUseCapture] = useState(false);
   const [ghanaCardVerifiedViaCapture, setGhanaCardVerifiedViaCapture] = useState(false);
   const [captureVerificationResult, setCaptureVerificationResult] = useState(null);
+  const [skipVerification, setSkipVerification] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
 
@@ -77,9 +78,9 @@ const Register = () => {
     e.preventDefault();
     e.stopPropagation();
 
-    if (role !== 'angel_donor') {
+    if (role !== 'angel_donor' && !skipVerification) {
       if (!ghanaCardVerifiedViaCapture && !ghanaCardFile) {
-        alert('Please upload your Ghana Card document or complete the camera capture verification.');
+        alert('Please upload your Ghana Card document or complete the camera capture verification. Or click "Continue without verification" below to complete registration and verify later.');
         return;
       }
       if (!ghanaCardVerifiedViaCapture && !formData.ghanaCard?.trim()) {
@@ -95,8 +96,8 @@ const Register = () => {
       alert('Please enter your NGO / Organization name.');
       return;
     }
-    if (role === 'ngo' && !businessRegFile) {
-      alert('Please upload your NGO Registration (RG) document.');
+    if (role === 'ngo' && !skipVerification && !businessRegFile) {
+      alert('Please upload your NGO Registration (RG) document. Or click "Continue without verification" to complete registration and upload later.');
       return;
     }
     if (role === 'donor_institution' && !formData.organization?.trim()) {
@@ -130,7 +131,7 @@ const Register = () => {
         localStorage.setItem('auth_token', registerResult.token);
       }
 
-      if (role !== 'angel_donor' && ghanaCardVerifiedViaCapture && captureVerificationResult) {
+      if (role !== 'angel_donor' && !skipVerification && ghanaCardVerifiedViaCapture && captureVerificationResult) {
         await ghanaCardApi.storeQoreIdResult({
           customer_reference: captureVerificationResult.request_id || `reg_${Date.now()}`,
           workflow_id: captureVerificationResult.request_id,
@@ -139,7 +140,7 @@ const Register = () => {
           firstname: formData.firstName.trim(),
           lastname: formData.lastName.trim(),
         });
-      } else if (role !== 'angel_donor' && ghanaCardFile) {
+      } else if (role !== 'angel_donor' && !skipVerification && ghanaCardFile) {
         await verificationDocumentApi.upload(
           ghanaCardFile,
           'Ghana Card',
@@ -152,7 +153,7 @@ const Register = () => {
         );
       }
 
-      if ((role === 'ngo' || role === 'donor_institution') && businessRegFile) {
+      if ((role === 'ngo' || role === 'donor_institution') && businessRegFile && !skipVerification) {
         await verificationDocumentApi.upload(
           businessRegFile,
           role === 'ngo' ? 'NGO Registration (RG)' : 'Business Registration',
@@ -166,7 +167,9 @@ const Register = () => {
       if (loginResult.success) {
         alert(role === 'angel_donor'
           ? 'Registration successful! You can donate up to GH₵5,000 per donation. No ID verification required.'
-          : 'Registration successful! Your documents are being reviewed. You will be notified once verified.');
+          : skipVerification
+            ? 'Registration successful! Complete verification from your dashboard to make requests or donations.'
+            : 'Registration successful! Your documents are being reviewed. You will be notified once verified.');
         navigate('/dashboard');
       }
     } catch (error) {
@@ -446,6 +449,25 @@ const Register = () => {
                   maxSizeMB={5}
                   description="Upload a clear photo or scan of your Ghana Card (front and back if applicable)"
                 />
+              )}
+            </div>
+
+            {/* Skip verification option */}
+            <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+              <p className="text-sm text-amber-800 mb-2">
+                Having trouble with camera or upload? You can complete registration now and verify later from your dashboard.
+              </p>
+              <button
+                type="button"
+                onClick={() => setSkipVerification(!skipVerification)}
+                className="text-sm font-semibold text-amber-700 hover:text-amber-900 underline"
+              >
+                {skipVerification ? '✓ I\'ll verify now (require documents)' : 'Continue without verification — I\'ll verify later'}
+              </button>
+              {skipVerification && (
+                <p className="text-xs text-amber-700 mt-2">
+                  You will not be able to make requests or donations until verification is complete.
+                </p>
               )}
             </div>
 
