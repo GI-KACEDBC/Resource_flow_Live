@@ -5,10 +5,11 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\File as FileFacade;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class FileUploadController extends Controller
 {
@@ -22,7 +23,7 @@ class FileUploadController extends Controller
     public function download(Request $request)
     {
         $path = $request->query('path');
-        if (empty($path) || !is_string($path)) {
+        if (empty($path) || ! is_string($path)) {
             return response()->json(['message' => 'Path is required'], 400);
         }
         $path = ltrim(str_replace('\\', '/', $path), '/');
@@ -36,15 +37,28 @@ class FileUploadController extends Controller
                 break;
             }
         }
-        if (!$allowed) {
+        if (! $allowed) {
             return response()->json(['message' => 'Access denied'], 403);
         }
         $disk = Storage::disk('public');
-        if (!$disk->exists($path)) {
+        if (! $disk->exists($path)) {
             return response()->json(['message' => 'File not found'], 404);
         }
         $filename = basename($path);
-        $fullPath = $disk->path($path);
+        $publicRoot = realpath(storage_path('app/public'));
+        $fullPath = realpath($disk->path($path));
+        if ($publicRoot === false || $fullPath === false) {
+            Log::warning('File download: path resolution failed', ['path' => $path]);
+
+            return response()->json(['message' => 'Invalid path'], 400);
+        }
+        $rootPrefix = $publicRoot.DIRECTORY_SEPARATOR;
+        if (! str_starts_with($fullPath, $rootPrefix) && $fullPath !== $publicRoot) {
+            Log::warning('File download: resolved path outside public storage', ['path' => $path]);
+
+            return response()->json(['message' => 'Access denied'], 403);
+        }
+
         return response()->download($fullPath, $filename);
     }
 
@@ -54,68 +68,61 @@ class FileUploadController extends Controller
     public function upload(Request $request): JsonResponse
     {
         try {
-            // Validate type first to determine file size limit
             $type = $request->input('type');
-            
-            // Define size limits based on file type (in KB, Laravel validation uses KB)
+
             $sizeLimits = [
-                'verification_document' => 5120,  // 5MB - Ghana Card, Business Reg
-                'request_document' => 10240,       // 10MB - Supporting documents
-                'donation_document' => 10240,     // 10MB - Donation receipts
-                'delivery_proof' => 5120,        // 5MB - Ghana Card, recipient photo, signature
-                'project' => 5120,               // 5MB - Project cover, proof docs
-                'other' => 10240,                 // 10MB - Default
+                'verification_document' => 5120,
+                'request_document' => 10240,
+                'donation_document' => 10240,
+                'delivery_proof' => 5120,
+                'project' => 5120,
+                'other' => 10240,
             ];
-            
-            $maxSize = $sizeLimits[$type] ?? 10240; // Default to 10MB
-            
-            // Define allowed mime types based on file type
+
+            $maxSize = $sizeLimits[$type] ?? 10240;
+
             $mimeTypes = [
-                'verification_document' => 'jpg,jpeg,png,pdf', // Images and PDFs for verification
-                'request_document' => 'jpg,jpeg,png,pdf,doc,docx', // All document types
-                'donation_document' => 'jpg,jpeg,png,pdf', // Receipts and invoices
-                'delivery_proof' => 'jpg,jpeg,png', // Ghana Card, recipient photo, signature
-                'project' => 'jpg,jpeg,png,pdf',   // Project cover, proof docs
+                'verification_document' => 'jpg,jpeg,png,pdf',
+                'request_document' => 'jpg,jpeg,png,pdf,doc,docx',
+                'donation_document' => 'jpg,jpeg,png,pdf',
+                'delivery_proof' => 'jpg,jpeg,png',
+                'project' => 'jpg,jpeg,png,pdf',
                 'other' => 'jpg,jpeg,png,pdf,doc,docx',
             ];
-            
+
             $allowedMimes = $mimeTypes[$type] ?? 'jpg,jpeg,png,pdf,doc,docx';
-            
-            // Validate file and type with type-specific limits
+
             $validated = $request->validate([
                 'file' => "required|file|max:{$maxSize}|mimes:{$allowedMimes}",
                 'type' => 'required|in:request_document,verification_document,donation_document,delivery_proof,project,other',
             ]);
-        } catch (\Illuminate\Validation\ValidationException $e) {
+        } catch (ValidationException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Validation failed: ' . implode(', ', $e->errors()['file'] ?? []),
+                'message' => 'Validation failed: '.implode(', ', $e->errors()['file'] ?? []),
                 'errors' => $e->errors(),
             ], 422);
         }
 
         try {
             $file = $request->file('file');
-            
-            if (!$file || !$file->isValid()) {
+
+            if (! $file || ! $file->isValid()) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Invalid file or file upload failed',
                 ], 422);
             }
-            
+
             $type = $validated['type'];
-            
-            // Sanitize original filename
+
             $originalName = $file->getClientOriginalName();
             $originalName = preg_replace('/[^a-zA-Z0-9._-]/', '_', $originalName);
-            
-            // Get extension from original file or mime type
+
             $extension = $file->getClientOriginalExtension();
             if (empty($extension)) {
-                // Try to get extension from mime type
                 $mimeType = $file->getMimeType();
-                $extension = match($mimeType) {
+                $extension = match ($mimeType) {
                     'application/pdf' => 'pdf',
                     'image/jpeg' => 'jpg',
                     'image/png' => 'png',
@@ -124,12 +131,10 @@ class FileUploadController extends Controller
                     default => 'bin',
                 };
             }
-            
-            // Generate unique filename
-            $filename = Str::uuid() . '_' . time() . '.' . strtolower($extension);
-            
-            // Determine storage path based on type
-            $path = match($type) {
+
+            $filename = Str::uuid().'_'.time().'.'.strtolower($extension);
+
+            $path = match ($type) {
                 'request_document' => 'requests',
                 'verification_document' => 'verifications',
                 'donation_document' => 'donations',
@@ -137,26 +142,23 @@ class FileUploadController extends Controller
                 'project' => 'projects',
                 default => 'uploads',
             };
-            
-            // Ensure directory exists
-            $fullPath = storage_path('app/public/' . $path);
-            if (!is_dir($fullPath)) {
+
+            $fullPath = storage_path('app/public/'.$path);
+            if (! is_dir($fullPath)) {
                 FileFacade::makeDirectory($fullPath, 0755, true);
             }
-            
-            // Store file in public disk
+
             $storedPath = $file->storeAs($path, $filename, 'public');
-            
-            if (!$storedPath) {
+
+            if (! $storedPath) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Failed to store file on server',
                 ], 500);
             }
-            
-            // Get full URL (relative path for storage)
-            $url = '/storage/' . $storedPath;
-            
+
+            $url = '/storage/'.$storedPath;
+
             return response()->json([
                 'success' => true,
                 'path' => $storedPath,
@@ -165,17 +167,16 @@ class FileUploadController extends Controller
                 'size' => $file->getSize(),
                 'mime_type' => $file->getMimeType(),
             ]);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error('File upload error', [
                 'message' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
                 'file' => $request->file('file')?->getClientOriginalName(),
             ]);
-            
+
             return response()->json([
                 'success' => false,
-                'message' => 'File upload failed: ' . $e->getMessage(),
-                'error_details' => config('app.debug') ? $e->getTraceAsString() : null,
+                'message' => 'Upload failed. Please try again or use a smaller file.',
             ], 500);
         }
     }
@@ -185,11 +186,19 @@ class FileUploadController extends Controller
      */
     public function uploadMultiple(Request $request): JsonResponse
     {
-        $validated = $request->validate([
-            'files' => 'required|array|min:1|max:5',
-            'files.*' => 'required|file|max:10240', // 10MB max per file
-            'type' => 'required|in:request_document,verification_document,donation_document,delivery_proof,other',
-        ]);
+        try {
+            $validated = $request->validate([
+                'files' => 'required|array|min:1|max:5',
+                'files.*' => 'required|file|max:10240',
+                'type' => 'required|in:request_document,verification_document,donation_document,delivery_proof,other',
+            ]);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed.',
+                'errors' => $e->errors(),
+            ], 422);
+        }
 
         $uploadedFiles = [];
         $errors = [];
@@ -197,9 +206,9 @@ class FileUploadController extends Controller
         foreach ($request->file('files') as $index => $file) {
             try {
                 $extension = $file->getClientOriginalExtension();
-                $filename = Str::uuid() . '_' . time() . '_' . $index . '.' . $extension;
-                
-                $path = match($validated['type']) {
+                $filename = Str::uuid().'_'.time().'_'.$index.'.'.$extension;
+
+                $path = match ($validated['type']) {
                     'request_document' => 'requests',
                     'verification_document' => 'verifications',
                     'donation_document' => 'donations',
@@ -207,10 +216,10 @@ class FileUploadController extends Controller
                     'project' => 'projects',
                     default => 'uploads',
                 };
-                
+
                 $storedPath = $file->storeAs($path, $filename, 'public');
-                $url = '/storage/' . $storedPath;
-                
+                $url = '/storage/'.$storedPath;
+
                 $uploadedFiles[] = [
                     'path' => $storedPath,
                     'url' => $url,
@@ -218,10 +227,14 @@ class FileUploadController extends Controller
                     'size' => $file->getSize(),
                     'mime_type' => $file->getMimeType(),
                 ];
-            } catch (\Exception $e) {
+            } catch (\Throwable $e) {
+                Log::error('File upload multiple: single file failed', [
+                    'message' => $e->getMessage(),
+                    'original' => $file->getClientOriginalName(),
+                ]);
                 $errors[] = [
                     'file' => $file->getClientOriginalName(),
-                    'error' => $e->getMessage(),
+                    'error' => 'Upload failed',
                 ];
             }
         }

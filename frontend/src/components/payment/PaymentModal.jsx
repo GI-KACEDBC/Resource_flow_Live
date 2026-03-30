@@ -79,9 +79,11 @@ const PaymentModal = ({
               reference: response.reference,
               amount: amountInGHC,
               type: paymentType === 'project' ? 'Project Funding' : paymentType === 'general' ? 'General Support' : 'Donation',
-              description: paymentType === 'project' 
-                ? `Funding for project: ${projectData?.name || 'Unknown'}`
-                : 'General support for ResourceFlow',
+              project_id: paymentType === 'project' && projectData?.id ? projectData.id : undefined,
+              description:
+                paymentType === 'project'
+                  ? `Funding for project: ${projectData?.title || projectData?.name || 'Unknown'}`
+                  : 'General support for ResourceFlow',
             });
             
             setSuccess(true);

@@ -1,11 +1,11 @@
 // ## Inventory Management Component
 // ## Admin confirms receipt before items appear in inventory. Auditor then authorizes prices.
 import React, { useState, useMemo, useEffect } from 'react';
-import { Package, Search, MapPin, User, AlertTriangle, CheckCircle, Clock, Lock, Coins, Loader2, Truck } from 'lucide-react';
+import { Package, Search, MapPin, User, AlertTriangle, CheckCircle, Clock, Lock, Coins, Loader2, Truck, Banknote } from 'lucide-react';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 import { formatGHC } from '../../utils/currency';
-import { donationApi } from '../../services/api';
+import { donationApi, fetchSanctumCsrfCookie } from '../../services/api';
 
 // Map donation to display format
 const mapDonationToItem = (d) => ({
@@ -36,27 +36,38 @@ const mapDonationToItem = (d) => ({
 const Inventory = () => {
   const [donations, setDonations] = useState([]);
   const [pendingReceipt, setPendingReceipt] = useState([]);
+  /** Monetary donations still Pending (e.g. awaiting Paystack) — excluded from goods-only receipt flow */
+  const [pendingMonetary, setPendingMonetary] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [confirmingId, setConfirmingId] = useState(null);
+  const [adminPaystackRefs, setAdminPaystackRefs] = useState({});
+  const [verifyingPaystackId, setVerifyingPaystackId] = useState(null);
 
   const fetchData = async () => {
     try {
       setLoading(true);
       setError(null);
-      const [confirmed, pending] = await Promise.all([
+      const [confirmed, pending, statusPending] = await Promise.all([
         donationApi.getAll({ receipt_confirmed: true }),
         donationApi.getAll({ receipt_confirmed: false }),
+        donationApi.getAll({ status: 'Pending' }),
       ]);
       const goods = (d) => d.type === 'Goods';
       setDonations(Array.isArray(confirmed) ? confirmed.filter(goods) : []);
       setPendingReceipt(Array.isArray(pending) ? pending.filter(goods) : []);
+      setPendingMonetary(
+        Array.isArray(statusPending)
+          ? statusPending.filter((d) => d && d.type === 'Monetary' && d.status === 'Pending')
+          : []
+      );
     } catch (err) {
       console.error('Error fetching inventory:', err);
       setError('Failed to load inventory.');
       setDonations([]);
       setPendingReceipt([]);
+      setPendingMonetary([]);
     } finally {
       setLoading(false);
     }
@@ -65,6 +76,25 @@ const Inventory = () => {
   useEffect(() => {
     fetchData();
   }, []);
+
+  const handleAdminVerifyPaystack = async (donationId) => {
+    const ref = (adminPaystackRefs[donationId] || '').trim();
+    if (!ref) {
+      alert('Paste the Paystack transaction reference (from Paystack dashboard).');
+      return;
+    }
+    try {
+      setVerifyingPaystackId(donationId);
+      await fetchSanctumCsrfCookie();
+      await donationApi.verifyMonetaryAsAdmin(donationId, ref);
+      await fetchData();
+      setAdminPaystackRefs((prev) => ({ ...prev, [donationId]: '' }));
+    } catch (err) {
+      alert(err?.response?.data?.message || err?.message || 'Verification failed.');
+    } finally {
+      setVerifyingPaystackId(null);
+    }
+  };
 
   const handleConfirmReceipt = async (donationId) => {
     try {
@@ -223,8 +253,76 @@ const Inventory = () => {
       {/* Header */}
       <div>
         <h2 className="text-xl font-bold text-slate-800">Inventory Management</h2>
-        <p className="text-slate-500 mt-1">Confirm receipt of donated goods before they appear in inventory. Auditor then authorizes prices.</p>
+        <p className="text-slate-500 mt-1">
+          Cash donations awaiting payment appear below. For goods, confirm physical receipt before stock is counted; auditors
+          then lock prices.
+        </p>
       </div>
+
+      {/* Pending monetary — not part of goods receipt; shown so admins see stuck or unpaid Paystack flows */}
+      {pendingMonetary.length > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl overflow-hidden">
+          <div className="p-4 border-b border-blue-200 bg-blue-100/50">
+            <h3 className="font-bold text-slate-800 flex items-center gap-2">
+              <Banknote size={18} />
+              Pending monetary donations ({pendingMonetary.length})
+            </h3>
+            <p className="text-sm text-slate-600 mt-1">
+              Paste the Paystack reference from your dashboard; the server checks the amount matches this donation (GHS).
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-blue-100/50 border-b border-blue-200">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Item</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Donor</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Amount</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Paystack reference</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-blue-200">
+                {pendingMonetary.map((d) => (
+                  <tr key={d.id} className="hover:bg-blue-50/50">
+                    <td className="px-6 py-4">
+                      <div className="font-medium text-slate-900">{d.item}</div>
+                      <div className="text-sm text-slate-500">{d.description || '—'}</div>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-slate-700">{d.user?.name || '—'}</td>
+                    <td className="px-6 py-4 text-sm font-medium">{formatGHC(Number(d.quantity))}</td>
+                    <td className="px-6 py-4">
+                      <span className="text-xs font-semibold text-amber-800 bg-amber-100 px-2 py-1 rounded">Pending</span>
+                    </td>
+                    <td className="px-6 py-4 min-w-[200px]">
+                      <Input
+                        type="text"
+                        placeholder="e.g. T1234567890"
+                        value={adminPaystackRefs[d.id] ?? ''}
+                        onChange={(e) =>
+                          setAdminPaystackRefs((prev) => ({ ...prev, [d.id]: e.target.value }))
+                        }
+                        className="text-sm"
+                      />
+                    </td>
+                    <td className="px-6 py-4 text-sm">
+                      <Button
+                        size="sm"
+                        icon={CheckCircle}
+                        onClick={() => handleAdminVerifyPaystack(d.id)}
+                        disabled={verifyingPaystackId === d.id}
+                      >
+                        {verifyingPaystackId === d.id ? 'Verifying…' : 'Verify'}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Pending Receipt - Admin must confirm before item is added to inventory */}
       {pendingReceipt.length > 0 && (

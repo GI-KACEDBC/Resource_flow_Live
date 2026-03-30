@@ -1,6 +1,10 @@
 # Deployment config with credentials - never commit
 scripts/vps-deploy-config
 
+# Local editor / AI tooling (do not commit)
+.cursor/
+mcps/
+
 # macOS metadata
 .DS_Store
 ._*

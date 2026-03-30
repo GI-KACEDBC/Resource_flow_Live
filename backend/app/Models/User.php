@@ -13,9 +13,13 @@ class User extends Authenticatable
 
     /** Staff roles that Super Admin can create */
     public const ROLE_AUDITOR = 'auditor';
+
     public const ROLE_FIELD_AGENT = 'field_agent';
+
     public const ROLE_DRIVER = 'driver';
+
     public const ROLE_SUPERVISOR = 'supervisor';
+
     public const ROLE_SPECIAL = 'special';
 
     public const STAFF_ROLES = [
@@ -79,9 +83,10 @@ class User extends Authenticatable
     public function isPasswordExpired(): bool
     {
         $changedAt = $this->password_changed_at ?? $this->created_at;
-        if (!$changedAt) {
+        if (! $changedAt) {
             return true;
         }
+
         return $changedAt->addDays(self::PASSWORD_EXPIRY_DAYS)->isPast();
     }
 
@@ -123,6 +128,18 @@ class User extends Authenticatable
     public function isAdmin(): bool
     {
         return $this->role === 'admin';
+    }
+
+    /** Dedicated finance role (reserved for future policy expansion). */
+    public function isFinance(): bool
+    {
+        return $this->role === 'finance';
+    }
+
+    /** Whether this user may list all financial rows (Super Admin only). */
+    public function canListAllFinancialRecords(): bool
+    {
+        return $this->isSuperAdmin();
     }
 
     /** Super Admin is the single account that can create Admin and Staff users. */
@@ -215,6 +232,7 @@ class User extends Authenticatable
             return true;
         }
         $permissions = $this->permissions ?? [];
+
         return is_array($permissions) && in_array($permission, $permissions);
     }
 
@@ -230,6 +248,7 @@ class User extends Authenticatable
             'donor_individual' => 'Donor (Individual)',
             'angel_donor' => 'Angel Donor',
         ];
+
         return $labels[$this->role ?? ''] ?? ucfirst(str_replace('_', ' ', $this->role ?? ''));
     }
 

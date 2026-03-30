@@ -12,7 +12,7 @@ class VerifyCsrfToken extends Middleware
      * @var array<int, string>
      */
     protected $except = [
-        'api/*',
+        // Server-to-server webhooks cannot send a CSRF token.
+        'api/payments/paystack-webhook',
     ];
 }
-

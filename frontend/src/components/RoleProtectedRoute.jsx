@@ -2,6 +2,10 @@ import React from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 
+/**
+ * Requires authentication and an allowed role. Wrong role redirects to `/dashboard` so we do not
+ * leak whether a protected route exists (vs returning 403 in the SPA).
+ */
 export const RoleProtectedRoute = ({
   children,
   allowedRoles,
@@ -10,7 +14,6 @@ export const RoleProtectedRoute = ({
 }) => {
   const { role, isAuthenticated, loading, isVerified, user } = useAuth();
 
-  // Show loading while checking auth
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-emerald-900 via-emerald-800 to-slate-900">
@@ -22,24 +25,19 @@ export const RoleProtectedRoute = ({
     );
   }
 
-  // Redirect unauthenticated users to home
   if (!isAuthenticated) {
     return <Navigate to="/home" replace />;
   }
 
-  // If role is not in allowed roles, redirect to dashboard (not logout)
-  // This prevents logout on unauthorized access attempts (guard against null role)
   if (!allowedRoles || !role || !allowedRoles.includes(role)) {
     console.warn(`Access denied: Role '${role}' not in allowed roles:`, allowedRoles);
     return <Navigate to="/dashboard" replace />;
   }
 
-  // Super Admin only (e.g. User Management – Admin cannot create users)
   if (requiresSuperAdmin && !user?.is_super_admin) {
     return <Navigate to="/dashboard" replace />;
   }
 
-  // Block Request/Donate for unverified supplier/recipient/ngo
   if (requiresVerification && !isVerified && ['ngo', 'donor_institution', 'donor_individual', 'recipient'].includes(role)) {
     return <Navigate to="/verification-wait" replace />;
   }

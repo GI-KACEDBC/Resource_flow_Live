@@ -7,6 +7,9 @@ use Illuminate\Validation\Validator;
 
 class StoreDonationRequest extends FormRequest
 {
+    /** Matches DB DECIMAL(10,2): absolute value must stay below 10^8. */
+    public const MAX_NUMERIC_10_2 = 99999999.99;
+
     /** Individual donation threshold (GHS) - above this, full details required */
     public const INDIVIDUAL_ANONYMOUS_LIMIT = 10000;
 
@@ -27,7 +30,7 @@ class StoreDonationRequest extends FormRequest
         $rules = [
             'type' => 'required|in:Goods,Monetary,Services',
             'item' => 'required|string|max:255',
-            'quantity' => 'required|numeric|min:0.01',
+            'quantity' => 'required|numeric|min:0.01|max:' . self::MAX_NUMERIC_10_2,
             'unit' => 'required|string|max:50',
             'description' => 'nullable|string',
             'warehouse_id' => 'nullable|exists:warehouses,id',
@@ -52,6 +55,7 @@ class StoreDonationRequest extends FormRequest
         return [
             'compliance_agreed.required' => 'Corporate donors must agree that the expenditure is wholly, exclusively, and necessarily incurred in the production of income.',
             'compliance_agreed.accepted' => 'You must agree to the tax compliance condition.',
+            'quantity.max' => 'The amount or quantity exceeds the maximum allowed for this field (' . number_format(self::MAX_NUMERIC_10_2, 2) . ').',
         ];
     }
 

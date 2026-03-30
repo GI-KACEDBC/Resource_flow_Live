@@ -68,20 +68,72 @@ const DeliveryDashboard = () => {
     return Array.isArray(logistics) ? logistics.filter(log => log && log.delivery_route_id === routeId) : [];
   };
 
-  const getStatusTimeline = (logistic) => {
+  /** Route scheduled_date is date-only; avoid implying a false time. */
+  const formatDateOnly = (dateString) => {
+    if (!dateString) return '—';
+    const d = new Date(dateString);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return '—';
+    const d = new Date(dateString);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  /**
+   * In Transit must not fall back to created_at (same as "Booked") and must not use a
+   * last_location_update that parses before booking (common date-only / UTC midnight issue).
+   */
+  const getInTransitTimestamp = (logistic) => {
+    const created = new Date(logistic.created_at).getTime();
+    const updated = new Date(logistic.updated_at).getTime();
+    if (logistic.last_location_update) {
+      const last = new Date(logistic.last_location_update).getTime();
+      if (Number.isFinite(last) && last >= created) {
+        return logistic.last_location_update;
+      }
+    }
+    if (Number.isFinite(updated) && updated >= created) {
+      return logistic.updated_at;
+    }
+    return logistic.updated_at;
+  };
+
+  const getStatusTimeline = (logistic, route) => {
     const timeline = [];
-    
+
+    if (route?.scheduled_date) {
+      timeline.push({
+        status: 'Scheduled delivery',
+        date: route.scheduled_date,
+        dateOnly: true,
+        icon: Calendar,
+        color: 'bg-blue-100 text-blue-700',
+      });
+    }
+
     timeline.push({
-      status: 'Scheduled',
+      status: 'Booked',
       date: logistic.created_at,
-      icon: Calendar,
-      color: 'bg-blue-100 text-blue-700',
+      dateOnly: false,
+      icon: Package,
+      color: 'bg-slate-100 text-slate-700',
     });
 
     if (logistic.status === 'In Transit' || logistic.status === 'Delivered') {
       timeline.push({
         status: 'In Transit',
-        date: logistic.last_location_update || logistic.created_at,
+        date: getInTransitTimestamp(logistic),
+        dateOnly: false,
         icon: Truck,
         color: 'bg-amber-100 text-amber-700',
       });
@@ -91,6 +143,7 @@ const DeliveryDashboard = () => {
       timeline.push({
         status: 'Delivered',
         date: logistic.updated_at,
+        dateOnly: false,
         icon: CheckCircle,
         color: 'bg-emerald-100 text-emerald-700',
       });
@@ -100,22 +153,15 @@ const DeliveryDashboard = () => {
       timeline.push({
         status: 'Delayed',
         date: logistic.updated_at,
+        dateOnly: false,
         icon: AlertCircle,
         color: 'bg-red-100 text-red-700',
       });
     }
 
-    return timeline;
-  };
+    timeline.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-  const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    return timeline;
   };
 
   if (loading && (!Array.isArray(deliveryRoutes) || deliveryRoutes.length === 0)) {
@@ -342,7 +388,7 @@ const DeliveryDashboard = () => {
                       </div>
                       <div className="flex items-center gap-1">
                         <Calendar size={14} />
-                        <span>{formatDate(route.scheduled_date)}</span>
+                        <span>Scheduled {formatDateOnly(route.scheduled_date)}</span>
                       </div>
                     </div>
                   </div>
@@ -374,7 +420,7 @@ const DeliveryDashboard = () => {
                       Packages ({routeLogistics.length})
                     </h4>
                     {routeLogistics.map((logistic) => {
-                      const timeline = getStatusTimeline(logistic);
+                      const timeline = getStatusTimeline(logistic, route);
                       
                       return (
                         <div
@@ -408,7 +454,9 @@ const DeliveryDashboard = () => {
                                       </div>
                                       <div>
                                         <p className="text-xs font-semibold text-slate-800">{step.status}</p>
-                                        <p className="text-xs text-slate-500">{formatDate(step.date)}</p>
+                                        <p className="text-xs text-slate-500">
+                                          {step.dateOnly ? formatDateOnly(step.date) : formatDate(step.date)}
+                                        </p>
                                       </div>
                                     </div>
                                     {!isLast && (

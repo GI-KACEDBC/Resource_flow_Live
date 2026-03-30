@@ -41,10 +41,19 @@ const CreateDonation = () => {
   // ## Handle input changes
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+    setFormData((prev) => {
+      const next = { ...prev, [name]: value };
+      if (name === 'type') {
+        if (value === 'Monetary') {
+          next.unit = 'GH₵';
+        } else if (value === 'Goods') {
+          next.unit = 'bags';
+        } else if (value === 'Services') {
+          next.unit = 'hours';
+        }
+      }
+      return next;
+    });
     // ## Clear error for this field
     if (errors[name]) {
       setErrors((prev) => ({

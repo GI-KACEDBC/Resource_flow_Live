@@ -14,6 +14,7 @@ class Financial extends Model
         'user_id',
         'donation_id',
         'allocation_id',
+        'project_id',
         'amount',
         'currency',
         'payment_reference',
@@ -41,5 +42,10 @@ class Financial extends Model
     public function allocation()
     {
         return $this->belongsTo(Allocation::class);
+    }
+
+    public function project()
+    {
+        return $this->belongsTo(Project::class);
     }
 }

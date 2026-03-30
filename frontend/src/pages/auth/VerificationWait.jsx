@@ -1,16 +1,28 @@
-// ## Verification Wait Page
-// ## Displays information for users with pending verification status
-import React from 'react';
+import React, { useState } from 'react';
 import { ShieldCheck, Clock, ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { Button } from '../../components/ui/Button';
+import { authApi } from '../../services/api';
 
 const VerificationWait = () => {
-  // ## Navigation hook for routing
   const navigate = useNavigate();
-  // ## Get current user from auth context
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
+  const [busy, setBusy] = useState(false);
+
+  const continueWithServerConsent = async (path) => {
+    setBusy(true);
+    try {
+      await authApi.acknowledgeUnverifiedDashboard();
+      await refreshUser();
+      navigate(path);
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || 'Could not continue. Please try again.';
+      alert(msg);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div
@@ -37,7 +49,7 @@ const VerificationWait = () => {
               <h3 className="font-semibold text-amber-900 mb-2">What happens next?</h3>
               <ul className="space-y-2 text-sm text-amber-800">
                 <li>• Our team will review your submitted documents</li>
-                <li>• You'll receive an email notification once verification is complete</li>
+                <li>• You&apos;ll receive an email notification once verification is complete</li>
                 <li>• This process typically takes 1-3 business days</li>
                 <li>• You can check your verification status from your dashboard</li>
               </ul>
@@ -69,19 +81,15 @@ const VerificationWait = () => {
           <Button
             variant="outline"
             icon={ArrowLeft}
-            onClick={() => {
-              sessionStorage.setItem('allowUnverifiedDashboard', '1');
-              navigate('/dashboard');
-            }}
+            onClick={() => continueWithServerConsent('/dashboard')}
+            disabled={busy}
             className="flex-1"
           >
-            Go to Dashboard
+            {busy ? 'Please wait…' : 'Go to Dashboard'}
           </Button>
           <Button
-            onClick={() => {
-              sessionStorage.setItem('allowUnverifiedDashboard', '1');
-              navigate('/dashboard/documents');
-            }}
+            onClick={() => continueWithServerConsent('/dashboard/documents')}
+            disabled={busy}
             className="flex-1"
             icon={ShieldCheck}
           >

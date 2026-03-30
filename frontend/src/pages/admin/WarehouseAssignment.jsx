@@ -11,7 +11,7 @@ const WarehouseAssignment = () => {
   const [donations, setDonations] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('Verified');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [selectedDonation, setSelectedDonation] = useState(null);
   const [selectedWarehouse, setSelectedWarehouse] = useState(null);
   const [colocationFacility, setColocationFacility] = useState('');
@@ -93,7 +93,10 @@ const WarehouseAssignment = () => {
       {/* Header */}
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-slate-800">Warehouse Assignment</h2>
-        <p className="text-slate-600 mt-1">Assign verified donations to warehouse facilities</p>
+        <p className="text-slate-600 mt-1">
+          Assign goods donations to a warehouse (Pending or Verified, unassigned). Monetary donations do not use
+          warehouses.
+        </p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -118,8 +121,9 @@ const WarehouseAssignment = () => {
                   onChange={(e) => setStatusFilter(e.target.value)}
                   className="p-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 >
+                  <option value="all">All (Pending + Verified)</option>
+                  <option value="Pending">Pending</option>
                   <option value="Verified">Verified</option>
-                  <option value="all">All Status</option>
                 </select>
               </div>
             </div>

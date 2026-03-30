@@ -21,6 +21,14 @@ class Project extends Model
         'target_amount',
         'funded_amount',
         'raised_amount',
+        'estimated_total_value',
+        'verified_ceiling_ghs',
+        'admin_verified_value_at',
+        'admin_verified_value_by',
+        'admin_value_notes',
+        'auditor_verified_value_at',
+        'auditor_verified_value_by',
+        'auditor_value_notes',
         'impact_metrics',
         'location',
         'location_gps',
@@ -69,6 +77,16 @@ class Project extends Model
         return $this->belongsTo(User::class, 'verified_by');
     }
 
+    public function adminValueVerifier()
+    {
+        return $this->belongsTo(User::class, 'admin_verified_value_by');
+    }
+
+    public function auditorValueVerifier()
+    {
+        return $this->belongsTo(User::class, 'auditor_verified_value_by');
+    }
+
     public function csrPartnerships()
     {
         return $this->hasMany(CSRPartnership::class);
@@ -111,5 +129,20 @@ class Project extends Model
     public function getEffectiveRaisedAmountAttribute(): float
     {
         return (float) ($this->attributes['raised_amount'] ?? $this->attributes['funded_amount'] ?? 0);
+    }
+
+    /** Total GHS recorded against the project (Paystack project funding + CSR commitments). */
+    public function totalRaisedGhs(): float
+    {
+        return (float) ($this->raised_amount ?? 0) + (float) ($this->funded_amount ?? 0);
+    }
+
+    /** Both admin and auditor have confirmed the funding ceiling after document review. */
+    public function hasDualVerifiedFundingCeiling(): bool
+    {
+        return $this->admin_verified_value_at
+            && $this->auditor_verified_value_at
+            && $this->verified_ceiling_ghs !== null
+            && (float) $this->verified_ceiling_ghs > 0;
     }
 }

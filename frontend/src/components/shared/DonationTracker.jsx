@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Package, CheckCircle, Clock, Truck, MapPin, FileDown, Loader2 } from 'lucide-react';
 import { StatusBadge } from './StatusBadge';
 import { donationApi } from '../../services/api';
+import { formatDonationQuantityLine } from '../../utils/currency';
 
 export const DonationTracker = ({ donations }) => {
   const [downloadingId, setDownloadingId] = useState(null);
@@ -47,7 +48,7 @@ export const DonationTracker = ({ donations }) => {
               <div>
                 <h3 className="font-bold text-slate-900">{donation.item}</h3>
                 <p className="text-sm text-slate-500">
-                  {donation.type} • {donation.quantity} {donation.unit}
+                  {donation.type} • {formatDonationQuantityLine(donation)}
                 </p>
               </div>
             </div>

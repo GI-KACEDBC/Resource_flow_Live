@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { Button } from '../../components/ui/Button';
@@ -6,7 +6,7 @@ import { FileUpload } from '../../components/ui/FileUpload';
 import { ShieldCheck, FileText, Loader2, Camera } from 'lucide-react';
 import GhanaCardVerificationBanner from '../../components/verification/GhanaCardVerificationBanner';
 import GhanaCardCapture from '../../components/verification/GhanaCardCapture';
-import { authApi, ghanaCardApi, verificationDocumentApi } from '../../services/api';
+import { authApi, fetchSanctumCsrfCookie, ghanaCardApi, verificationDocumentApi } from '../../services/api';
 
 const Register = () => {
   const [role, setRole] = useState('donor_individual');
@@ -32,8 +32,56 @@ const Register = () => {
   const [ghanaCardVerifiedViaCapture, setGhanaCardVerifiedViaCapture] = useState(false);
   const [captureVerificationResult, setCaptureVerificationResult] = useState(null);
   const [skipVerification, setSkipVerification] = useState(false);
-  const { login } = useAuth();
+  const [otpChannel, setOtpChannel] = useState('email');
+  const [otp, setOtp] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpSending, setOtpSending] = useState(false);
+  const { refreshUser } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    setOtpSent(false);
+    setOtp('');
+  }, [otpChannel]);
+
+  useEffect(() => {
+    fetchSanctumCsrfCookie().catch(() => {});
+  }, []);
+
+  const handleSendOtp = async () => {
+    if (!formData.email?.trim()) {
+      alert('Enter your email address first.');
+      return;
+    }
+    if (otpChannel === 'sms' && !formData.phone?.trim()) {
+      alert('Enter your mobile number to receive the SMS code.');
+      return;
+    }
+    setOtpSending(true);
+    try {
+      await authApi.sendRegistrationOtp({
+        email: formData.email.trim(),
+        otp_channel: otpChannel,
+        ...(otpChannel === 'sms' ? { phone: formData.phone.trim() } : {}),
+      });
+      setOtpSent(true);
+      alert(
+        otpChannel === 'email'
+          ? 'We sent a code to your email. Enter it below.'
+          : 'We sent a code to your phone. Enter it below.'
+      );
+    } catch (err) {
+      const d = err.response?.data;
+      const msg =
+        d?.errors?.email?.[0] ||
+        d?.errors?.phone?.[0] ||
+        d?.message ||
+        'Could not send verification code. Try again.';
+      alert(msg);
+    } finally {
+      setOtpSending(false);
+    }
+  };
 
   const handleVerifyGhanaCard = async () => {
     if (!formData.ghanaCard?.trim()) {
@@ -112,6 +160,18 @@ const Register = () => {
       alert('Password must be at least 8 characters.');
       return;
     }
+    if (!otpSent) {
+      alert('Send a verification code to your email or phone, then enter it below.');
+      return;
+    }
+    if (!/^\d{6}$/.test(otp.trim())) {
+      alert('Enter the 6-digit verification code.');
+      return;
+    }
+    if (otpChannel === 'sms' && !formData.phone?.trim()) {
+      alert('Phone number is required when verifying by SMS.');
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -123,13 +183,13 @@ const Register = () => {
         role,
         organization: formData.organization || '',
         phone: formData.phone || '',
+        otp_channel: otpChannel,
+        otp: otp.trim(),
       };
 
-      const registerResult = await authApi.register(registerData);
-      authApi.setToken(registerResult.token);
-      if (registerResult.token) {
-        localStorage.setItem('auth_token', registerResult.token);
-      }
+      await authApi.register(registerData);
+      // Register regenerates the session server-side; refresh CSRF before any follow-up POSTs (uploads, QoreID store).
+      await fetchSanctumCsrfCookie();
 
       if (role !== 'angel_donor' && !skipVerification && ghanaCardVerifiedViaCapture && captureVerificationResult) {
         await ghanaCardApi.storeQoreIdResult({
@@ -161,17 +221,14 @@ const Register = () => {
         );
       }
 
-      // Login user
-      const loginResult = await login(formData.email, formData.password);
-      
-      if (loginResult.success) {
-        alert(role === 'angel_donor'
-          ? 'Registration successful! You can donate up to GH₵5,000 per donation. No ID verification required.'
-          : skipVerification
-            ? 'Registration successful! Complete verification from your dashboard to make requests or donations.'
-            : 'Registration successful! Your documents are being reviewed. You will be notified once verified.');
-        navigate('/dashboard');
-      }
+      await refreshUser();
+
+      alert(role === 'angel_donor'
+        ? 'Registration successful! You can donate up to GH₵5,000 per donation. No ID verification required.'
+        : skipVerification
+          ? 'Registration successful! Complete verification from your dashboard to make requests or donations.'
+          : 'Registration successful! Your documents are being reviewed. You will be notified once verified.');
+      navigate('/dashboard');
     } catch (error) {
       console.error('Registration error:', error);
       const errData = error.response?.data;
@@ -179,6 +236,8 @@ const Register = () => {
         setVerificationResult({ type: 'name_mismatch', message: errData.message || 'The name on your Ghana Card does not match.' });
       } else if (errData?.error_code === 'INVALID_FORMAT' || errData?.error_code === 'NOT_FOUND') {
         setVerificationResult({ type: 'invalid_id', message: errData.message || 'Invalid Ghana Card or not found.' });
+      } else if (errData?.errors?.otp?.[0]) {
+        alert(errData.errors.otp[0]);
       } else {
         alert(errData?.message || 'Registration failed. Please try again.');
       }
@@ -340,6 +399,80 @@ const Register = () => {
               required
               minLength={8}
             />
+          </div>
+
+          <div className="space-y-4 p-4 bg-slate-50 rounded-lg border border-slate-200">
+            <p className="text-sm font-semibold text-slate-700">Verify your contact</p>
+            <p className="text-xs text-slate-600">
+              Choose where to receive your one-time code, then enter it to complete signup.
+            </p>
+            <div className="flex flex-wrap gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="otpChannel"
+                  checked={otpChannel === 'email'}
+                  onChange={() => setOtpChannel('email')}
+                  className="text-emerald-600"
+                />
+                <span className="text-sm">Email</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="otpChannel"
+                  checked={otpChannel === 'sms'}
+                  onChange={() => setOtpChannel('sms')}
+                  className="text-emerald-600"
+                />
+                <span className="text-sm">SMS (phone)</span>
+              </label>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 block mb-1">
+                {otpChannel === 'sms' ? 'Mobile number * (Ghana)' : 'Phone (optional)'}
+              </label>
+              <input
+                type="tel"
+                name="phone"
+                placeholder={otpChannel === 'sms' ? 'e.g. 0241234567' : 'Optional — for your profile'}
+                value={formData.phone}
+                onChange={handleChange}
+                className="w-full border p-2 rounded border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                required={otpChannel === 'sms'}
+              />
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleSendOtp}
+                disabled={otpSending}
+                icon={otpSending ? Loader2 : undefined}
+                className={`shrink-0 ${otpSending ? '[&_svg]:animate-spin' : ''}`}
+              >
+                {otpSending ? 'Sending…' : 'Send verification code'}
+              </Button>
+              {otpSent && (
+                <span className="text-xs text-emerald-700 font-medium">
+                  Code sent — enter it below
+                </span>
+              )}
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 block mb-1">6-digit code</label>
+              <input
+                type="text"
+                name="signupOtp"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                placeholder="000000"
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                className="w-full max-w-[12rem] border p-2 rounded border-slate-200 tracking-widest font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
           </div>
 
           {/* Document Upload Section - not required for Angel Donors */}

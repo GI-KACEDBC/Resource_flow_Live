@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Package, Search, MapPin, User, CheckCircle, Clock, Truck, Filter, AlertTriangle, TrendingUp, Award } from 'lucide-react';
 import { Input } from '../../components/ui/Input';
 import { StatusBadge } from '../../components/shared/StatusBadge';
-import { formatGHC } from '../../utils/currency';
+import { formatDonationQuantityLine, formatGHC } from '../../utils/currency';
 import { Button } from '../../components/ui/Button';
 import { allocationApi, donationApi, requestApi } from '../../services/api';
 import { WarehouseModel } from '../../models/WarehouseModel';
@@ -21,6 +21,7 @@ const ResourceAllocation = () => {
   const [filterCategory, setFilterCategory] = useState('All');
   const [loading, setLoading] = useState(true);
   const [auditModalRequest, setAuditModalRequest] = useState(null);
+  const [recentAllocations, setRecentAllocations] = useState([]);
   const isLoadingRef = useRef(false);
 
   const loadData = async () => {
@@ -33,14 +34,17 @@ const ResourceAllocation = () => {
     try {
       isLoadingRef.current = true;
       setLoading(true);
-      const [requestsData, donationsData] = await Promise.all([
+      const [requestsData, donationsData, allocationsData] = await Promise.all([
         allocationApi.getPrioritizedRequests(),
         donationApi.getAll({ status: 'Verified' }),
+        allocationApi.getAll().catch(() => []),
       ]);
       // Ensure both are always arrays
       setPrioritizedRequests(Array.isArray(requestsData) ? requestsData : []);
       const donations = Array.isArray(donationsData) ? donationsData : [];
       setAvailableDonations(donations.filter(d => d && d.is_available));
+      const list = Array.isArray(allocationsData) ? allocationsData : [];
+      setRecentAllocations(list.slice(0, 25));
     } catch (error) {
       console.error('Error loading data:', error);
       // Don't show error for rate limiting - just log it
@@ -49,6 +53,7 @@ const ResourceAllocation = () => {
       }
       setPrioritizedRequests([]); // Set to empty array on error
       setAvailableDonations([]);
+      setRecentAllocations([]);
     } finally {
       setLoading(false);
       isLoadingRef.current = false;
@@ -154,15 +159,22 @@ const ResourceAllocation = () => {
     }
 
     try {
-      const allocations = Object.entries(selectedDonations).map(([donationId, quantity]) =>
-        allocationApi.create({
-          request_id: selectedRequest.request.id,
-          donation_id: parseInt(donationId),
-          quantity_allocated: quantity,
-        })
-      );
+      const requestId = Number(selectedRequest.request.id);
+      const entries = Object.entries(selectedDonations).map(([donationId, quantity]) => {
+        const qty = Number(quantity);
+        if (!Number.isFinite(qty) || qty < 0.01) {
+          throw new Error('Each allocation quantity must be at least 0.01.');
+        }
+        return {
+          request_id: requestId,
+          donation_id: Number(donationId),
+          quantity_allocated: qty,
+        };
+      });
 
-      await Promise.all(allocations);
+      for (const payload of entries) {
+        await allocationApi.create(payload);
+      }
       // Set flag to trigger refresh in other dashboards
       localStorage.setItem('allocation_created', Date.now().toString());
       alert('Allocation successful!');
@@ -171,10 +183,16 @@ const ResourceAllocation = () => {
       loadData();
     } catch (error) {
       console.error('Error creating allocation:', error);
+      const msg =
+        error.response?.data?.message ||
+        (error.response?.data?.errors &&
+          Object.values(error.response.data.errors).flat().join(' ')) ||
+        error.message ||
+        'Failed to create allocation. Please try again.';
       if (error.response?.status === 403) {
         alert('Recipient is not verified. Please verify the recipient before allocating resources.');
       } else {
-        alert('Failed to create allocation. Please try again.');
+        alert(msg);
       }
     }
   };
@@ -207,7 +225,8 @@ const ResourceAllocation = () => {
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-slate-800">Resource Allocation</h2>
         <p className="text-slate-600 mt-1">
-          Allocate resources based on vulnerability scores and priority levels
+          Allocate resources based on vulnerability scores and priority levels. Inventory shows donation stock;
+          this table lists allocation records (donation → request).
         </p>
       </div>
 
@@ -356,7 +375,10 @@ const ResourceAllocation = () => {
             ) : (
               filteredDonations.map((donation) => {
                 const selectedQuantity = selectedDonations[donation.id] || 0;
-                const maxQuantity = donation.quantity;
+                const maxQuantity =
+                  typeof donation.remaining_quantity === 'number'
+                    ? donation.remaining_quantity
+                    : Number(donation.remaining_quantity ?? donation.quantity) || 0;
 
                 return (
                   <div
@@ -367,7 +389,10 @@ const ResourceAllocation = () => {
                       <div className="flex-1">
                         <p className="font-semibold text-sm text-slate-900">{donation.item}</p>
                         <p className="text-xs text-slate-500">
-                          {donation.type} • {maxQuantity} {donation.unit} available
+                          {donation.type} •{' '}
+                          {donation.type === 'Monetary'
+                            ? `${formatGHC(maxQuantity)} available`
+                            : `${maxQuantity} ${donation.unit} available`}
                         </p>
                         {donation.warehouse && (
                           <p className="text-xs text-slate-500 mt-1">
@@ -382,13 +407,19 @@ const ResourceAllocation = () => {
                         min="0"
                         max={maxQuantity}
                         value={selectedQuantity}
-                        onChange={(e) =>
-                          updateDonationQuantity(donation.id, parseFloat(e.target.value) || 0)
-                        }
+                        onChange={(e) => {
+                          const raw = parseFloat(e.target.value);
+                          const clamped = Number.isFinite(raw)
+                            ? Math.min(Math.max(0, raw), maxQuantity)
+                            : 0;
+                          updateDonationQuantity(donation.id, clamped);
+                        }}
                         className="w-20 p-1 border border-slate-200 rounded text-sm"
                         placeholder="Qty"
                       />
-                      <span className="text-xs text-slate-500">{donation.unit}</span>
+                      {donation.type !== 'Monetary' && (
+                        <span className="text-xs text-slate-500">{donation.unit}</span>
+                      )}
                       {selectedQuantity > 0 && (
                         <span className="text-xs text-emerald-600 font-semibold">
                           Selected
@@ -426,6 +457,54 @@ const ResourceAllocation = () => {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Existing allocation rows — complements Inventory (donation-level) view */}
+      <div className="mt-8 border-t border-slate-200 pt-6">
+        <h3 className="text-lg font-semibold text-slate-800 mb-1">Recent allocations</h3>
+        <p className="text-sm text-slate-500 mb-4">
+          Records created when you match a donation to a request. Up to 25 most recent.
+        </p>
+        {recentAllocations.length === 0 ? (
+          <p className="text-sm text-slate-500 py-4">No allocation records yet.</p>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-50 text-slate-600 text-left">
+                <tr>
+                  <th className="px-4 py-2 font-medium">Item</th>
+                  <th className="px-4 py-2 font-medium">Qty</th>
+                  <th className="px-4 py-2 font-medium">Request</th>
+                  <th className="px-4 py-2 font-medium">Recipient</th>
+                  <th className="px-4 py-2 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentAllocations.map((a) => (
+                  <tr key={a.id} className="border-t border-slate-100">
+                    <td className="px-4 py-2 text-slate-800">{a.donation?.item || '—'}</td>
+                    <td className="px-4 py-2 text-slate-700">
+                      {a.donation
+                        ? formatDonationQuantityLine({
+                            type: a.donation.type,
+                            quantity: a.quantity_allocated,
+                            unit: a.donation.unit,
+                          })
+                        : a.quantity_allocated}
+                    </td>
+                    <td className="px-4 py-2 text-slate-700 max-w-[200px] truncate" title={a.request?.title}>
+                      {a.request?.title || '—'}
+                    </td>
+                    <td className="px-4 py-2 text-slate-700">{a.request?.user?.name || '—'}</td>
+                    <td className="px-4 py-2">
+                      <StatusBadge status={a.status} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Audit Review Modal */}

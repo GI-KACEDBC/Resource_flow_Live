@@ -2,7 +2,7 @@
 // ## Interactive SVG-based map showing regional request urgency with clickable regions
 // ## Uses updated Ghana map with 16 regions (ghana-svg-map, kwameboame/untamedthinking)
 // ## Uses urgency weights: Critical 2.0, High 1.5, Medium 1.0, Low 0.5
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useLayoutEffect } from 'react';
 import { MapPin, TrendingUp, Activity, Package, X, Warehouse } from 'lucide-react';
 import { formatGHC } from '../../utils/currency';
 import { useNavigate } from 'react-router-dom';
@@ -21,6 +21,32 @@ const URGENCY_WEIGHTS = {
 };
 
 const { width: MAP_WIDTH, height: MAP_HEIGHT } = GHANA_MAP_VIEWBOX;
+
+/** Safe DOM id for SVG path (no spaces). */
+const pathDomId = (svgRegionName) =>
+  `ghana-map-path-${svgRegionName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '')}`;
+
+/** When API/mock has no row for a region, still show hover card + donate (e.g. legacy Brong Ahafo). */
+const placeholderRegionStats = (dataRegionName) => ({
+  region: dataRegionName,
+  total_requests: 0,
+  totalRequests: 0,
+  critical_requests: 0,
+  criticalRequests: 0,
+  high_urgency_requests: 0,
+  highUrgencyRequests: 0,
+  medium_urgency_requests: 0,
+  mediumUrgencyRequests: 0,
+  low_urgency_requests: 0,
+  lowUrgencyRequests: 0,
+  urgency_score: 0,
+  urgencyScore: 0,
+  urgency_weighted_heat: 0,
+  net_need: 0,
+  requests: [],
+  flagged_requests: 0,
+  has_stale_data: false,
+});
 
 // ## Get heat color with urgency-weighted intensity (Task 2)
 const getHeatColorWithWeight = (urgencyScore, urgencyWeightedHeat = 0) => {
@@ -47,6 +73,8 @@ export const GhanaSVGHeatMap = ({
   const [selectedRegion, setSelectedRegion] = useState(null);
   // ## State for hovered region (stored as data region name)
   const [hoveredRegion, setHoveredRegion] = useState(null);
+  /** Label anchor per SVG key: computed from path bbox, or ghanaMapPaths labelX/labelY override */
+  const [labelPositions, setLabelPositions] = useState({});
   // ## Navigation hook
   const navigate = useNavigate();
 
@@ -79,6 +107,35 @@ export const GhanaSVGHeatMap = ({
     return () => clearInterval(interval);
   }, [updateInterval]);
 
+  // ## Place region name labels: optional labelX/labelY in ghanaMapPaths, else centroid from path getBBox
+  useLayoutEffect(() => {
+    if (loading && !mapData) return;
+    const measure = () => {
+      const next = {};
+      Object.entries(regionPaths).forEach(([svgRegionName, regionData]) => {
+        if (regionData.labelX != null && regionData.labelY != null) {
+          next[svgRegionName] = { x: regionData.labelX, y: regionData.labelY };
+          return;
+        }
+        const el = document.getElementById(pathDomId(svgRegionName));
+        if (el && typeof el.getBBox === 'function') {
+          try {
+            const bb = el.getBBox();
+            if (bb.width > 0 && bb.height > 0) {
+              next[svgRegionName] = { x: bb.x + bb.width / 2, y: bb.y + bb.height / 2 };
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+      });
+      setLabelPositions(next);
+    };
+    measure();
+    const raf = requestAnimationFrame(measure);
+    return () => cancelAnimationFrame(raf);
+  }, [loading, mapData]);
+
   // ## Handle region click - uses SVG region name, normalizes to data name
   const handleRegionClick = (svgRegionName) => {
     const dataRegionName = normalizeRegionName(svgRegionName);
@@ -96,15 +153,17 @@ export const GhanaSVGHeatMap = ({
     navigate('/dashboard/donate', { state: { prefillRegion: region } });
   };
 
-  // ## Get region stats by data region name
-  const getRegionStats = (dataRegionName) => {
-    return regionStats.find(s => s.region === dataRegionName);
-  };
+  // ## One stats row per region — Bono, Ahafo, Bono East, and legacy Brong Ahafo are not interchangeable
+  const getRegionStats = (dataRegionName) =>
+    regionStats.find((s) => s.region === dataRegionName);
 
   // ## Get nearest warehouse for a region
   const getNearestWarehouse = (region) => {
+    const regionKeys = [region];
     // ## Get warehouses from Model
-    const warehouses = WarehouseModel.getAllWarehouses().filter(wh => wh.region === region || wh.city.includes(region));
+    const warehouses = WarehouseModel.getAllWarehouses().filter((wh) =>
+      regionKeys.some((r) => wh.region === r || (wh.city && wh.city.includes(r)))
+    );
     if (warehouses.length > 0) {
       const warehouse = warehouses[0];
       const capacityPercent = warehouse.currentOccupancy && warehouse.capacity 
@@ -221,7 +280,7 @@ export const GhanaSVGHeatMap = ({
                 return (
                   <path
                     key={svgRegionName}
-                    id={svgRegionName}
+                    id={pathDomId(svgRegionName)}
                     d={regionData.path}
                     fill={fillColor}
                     fillOpacity={isHovered || isSelected ? 0.7 : 0.5}
@@ -239,18 +298,44 @@ export const GhanaSVGHeatMap = ({
                   />
                 );
               })}
+              {/* Region names — labelPositions from getBBox or labelX/labelY in ghanaMapPaths */}
+              {Object.entries(regionPaths).map(([svgRegionName]) => {
+                const pos = labelPositions[svgRegionName];
+                if (!pos) return null;
+                const label = normalizeRegionName(svgRegionName);
+                const fs = label.length > 14 ? 8 : label.length > 10 ? 9 : 10;
+                return (
+                  <text
+                    key={`label-${svgRegionName}`}
+                    x={pos.x}
+                    y={pos.y}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    pointerEvents="none"
+                    className="select-none"
+                    fill="#0f172a"
+                    stroke="#ffffff"
+                    strokeWidth={2.5}
+                    paintOrder="stroke fill"
+                    style={{ fontSize: fs, fontWeight: 700 }}
+                  >
+                    {label}
+                  </text>
+                );
+              })}
             </svg>
           </div>
         </div>
 
-        {/* ## Tooltip for hovered region */}
+        {/* ## Tooltip for hovered region — show even when API has no row (donate still works) */}
         {hoveredRegion && !selectedRegion && (() => {
-          const raw = getRegionStats(hoveredRegion);
-          if (!raw) return null;
+          const row = getRegionStats(hoveredRegion);
+          const raw = row ?? placeholderRegionStats(hoveredRegion);
           const stats = normStats(raw);
           const regionValue = calculateRegionValue(raw);
           const nearestWarehouse = getNearestWarehouse(hoveredRegion);
-          
+          const isPlaceholder = !row;
+
           return (
             <div className="absolute bg-slate-900/95 backdrop-blur-sm text-white p-4 rounded-lg border border-white/20 shadow-xl z-10"
               style={{ top: '10px', right: '10px', minWidth: '250px' }}>
@@ -258,6 +343,11 @@ export const GhanaSVGHeatMap = ({
                 <MapPin size={16} />
                 {raw.region} Region
               </h4>
+              {isPlaceholder && (
+                <p className="text-[10px] text-slate-400 mb-2">
+                  No live stats for this map area yet — you can still donate to this region.
+                </p>
+              )}
               <div className="space-y-2 text-xs">
                 <div className="flex items-center justify-between">
                   <span className="text-slate-300">Active Requests:</span>

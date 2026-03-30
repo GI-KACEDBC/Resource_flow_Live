@@ -1,5 +1,8 @@
-import axios from 'axios';
-import { LoginCredentials, RegisterData, AuthResponse, User } from '../types/auth';
+import { apiClient } from './api/client';
+export { fetchSanctumCsrfCookie } from './api/client';
+export { authApi } from './api/auth';
+export { financialApi } from './api/financial';
+export type { FinancialStatisticsResponse, FinancialSeriesPoint } from './api/financial';
 import {
   Warehouse,
   Donation,
@@ -7,7 +10,6 @@ import {
   Allocation,
   DeliveryRoute,
   Logistic,
-  Financial,
   VerificationDocument,
   AuditTrail,
   PrioritizedRequest,
@@ -44,139 +46,6 @@ export interface ContributionStats {
   funding_status: string;
   contributions: Contribution[];
 }
-
-// Use environment variable or default to 127.0.0.1:8000 (Laravel backend)
-// Using 127.0.0.1 instead of localhost to avoid IPv6 resolution issues on macOS
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api';
-
-const apiClient = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json',
-  },
-  withCredentials: true, // Required for Sanctum session cookies
-});
-
-// Add token to requests
-apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem('auth_token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  
-  // For FormData requests, remove Content-Type header to let browser set it with boundary
-  // This is crucial for file uploads - the browser needs to set multipart/form-data with the correct boundary
-  if (config.data instanceof FormData) {
-    delete config.headers['Content-Type'];
-  }
-  
-  return config;
-});
-
-// Handle 401/403 errors (unauthorized, password expired)
-apiClient.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    // Password expired - clear token and redirect to login
-    if (error.response?.status === 403 && error.response?.data?.error_code === 'PASSWORD_EXPIRED') {
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('auth_user');
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login?password_expired=1';
-      }
-      return Promise.reject(error);
-    }
-    // Only logout on 401 if it's not a CORS error and we have a token
-    if (error.response?.status === 401) {
-      const token = localStorage.getItem('auth_token');
-      
-      // Only logout if we had a token (real auth failure, not CORS)
-      if (token) {
-        console.warn('Authentication failed - logging out');
-        localStorage.removeItem('auth_token');
-        localStorage.removeItem('auth_user');
-        
-        // Only redirect if not already on login page
-        if (window.location.pathname !== '/login') {
-          window.location.href = '/login';
-        }
-      }
-    }
-    
-    // Don't auto-logout on network errors (CORS, connection refused, etc.)
-    if (!error.response && error.code !== 'ERR_NETWORK') {
-      console.error('API request failed:', error.message);
-    }
-    
-    return Promise.reject(error);
-  }
-);
-
-export const authApi = {
-  login: async (credentials: LoginCredentials): Promise<AuthResponse> => {
-    const url = `${apiClient.defaults.baseURL}/auth/login`;
-    console.log('🔐 Attempting login to:', url);
-    console.log('📧 Email:', credentials.email);
-    
-    try {
-      const response = await apiClient.post<AuthResponse>('/auth/login', credentials);
-      console.log('✅ Login successful:', response.data);
-      return response.data;
-    } catch (error: any) {
-      console.error('❌ Login failed:', error);
-      console.error('Error details:', {
-        message: error.message,
-        code: error.code,
-        response: error.response?.data,
-        status: error.response?.status,
-        url: url,
-      });
-      throw error;
-    }
-  },
-
-  register: async (data: RegisterData): Promise<AuthResponse> => {
-    const response = await apiClient.post<AuthResponse>('/auth/register', data);
-    return response.data;
-  },
-
-  logout: async (): Promise<void> => {
-    await apiClient.post('/auth/logout');
-  },
-
-  getMe: async (): Promise<User> => {
-    const response = await apiClient.get<User>('/auth/me', { timeout: 5000 });
-    return response.data;
-  },
-
-  changeExpiredPassword: async (data: {
-    email: string;
-    current_password: string;
-    password: string;
-    password_confirmation: string;
-  }): Promise<AuthResponse> => {
-    const response = await apiClient.post<AuthResponse>('/auth/change-expired-password', data);
-    return response.data;
-  },
-
-  changePassword: async (data: {
-    current_password: string;
-    password: string;
-    password_confirmation: string;
-  }): Promise<{ message: string }> => {
-    const response = await apiClient.post<{ message: string }>('/auth/change-password', data);
-    return response.data;
-  },
-
-  setToken: (token: string | null) => {
-    if (token) {
-      apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-    } else {
-      delete apiClient.defaults.headers.common['Authorization'];
-    }
-  },
-};
 
 export interface RequestData {
   title: string;
@@ -277,10 +146,8 @@ export const filesApi = {
   },
   /** Fetch file with auth and trigger download, or open in new tab for viewable types */
   downloadOrView: async (path: string, openInNewTab = false): Promise<void> => {
-    const token = localStorage.getItem('auth_token');
     const url = filesApi.getDownloadUrl(path);
     const res = await fetch(url, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
       credentials: 'include',
     });
     if (!res.ok) throw new Error(res.status === 404 ? 'File not found' : 'Download failed');
@@ -310,43 +177,18 @@ export const requestApi = {
     message?: string;
   }> => {
     try {
-      console.log('Uploading file to:', apiClient.defaults.baseURL + '/files/upload');
-      
-      // Verify FormData contains the file
-      console.log('FormData entries:');
-      for (const [key, value] of formData.entries()) {
-        console.log(`  ${key}:`, value instanceof File ? `File(${value.name}, ${value.size} bytes)` : value);
-      }
-      
-      // Don't set Content-Type header - let axios set it automatically for FormData
-      // This ensures the boundary is set correctly
-      // Explicitly remove Content-Type to let browser set multipart/form-data with boundary
-      // The interceptor will automatically remove Content-Type for FormData
-      // This allows the browser to set multipart/form-data with the correct boundary
       const response = await apiClient.post('/files/upload', formData, {
-        timeout: 30000, // 30 second timeout for file uploads
+        timeout: 30000,
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
       });
-      
-      console.log('Upload response:', response);
-      console.log('Response data:', response.data);
-      
-      // Check if response exists and has data
+
       if (!response || !response.data) {
         throw new Error('No response received from server');
       }
-      
+
       return response.data;
     } catch (error: any) {
-      // Better error handling
-      console.error('File upload error:', error);
-      console.error('Error type:', error.constructor.name);
-      console.error('Error response:', error.response?.data);
-      console.error('Error status:', error.response?.status);
-      console.error('Error code:', error.code);
-      console.error('Error message:', error.message);
-      
       // Network errors (no response)
       if (error.code === 'ECONNREFUSED' || error.code === 'ERR_NETWORK') {
         throw new Error('Cannot connect to server. Please ensure the backend is running on http://localhost:8000');
@@ -520,8 +362,9 @@ export const vulnerabilityScoreApi = {
 // Allocations API
 export const allocationApi = {
   getAll: async (params?: { status?: string; request_id?: number }): Promise<Allocation[]> => {
-    const response = await apiClient.get<Allocation[]>('/allocations', { params });
-    return response.data;
+    const response = await apiClient.get<{ data?: Allocation[] } | Allocation[]>('/allocations', { params });
+    const data = response.data;
+    return Array.isArray(data) ? data : (data?.data ?? []);
   },
 
   getById: async (id: number): Promise<Allocation> => {
@@ -779,39 +622,6 @@ export const verificationDocumentApi = {
   },
 };
 
-// Financials API
-export const financialApi = {
-  getAll: async (params?: { transaction_type?: string; status?: string; user_id?: number }): Promise<Financial[]> => {
-    const response = await apiClient.get<Financial[]>('/financials', { params });
-    return response.data;
-  },
-
-  getById: async (id: number): Promise<Financial> => {
-    const response = await apiClient.get<Financial>(`/financials/${id}`);
-    return response.data;
-  },
-
-  create: async (data: Partial<Financial>): Promise<Financial> => {
-    const response = await apiClient.post<Financial>('/financials', data);
-    return response.data;
-  },
-
-  update: async (id: number, data: Partial<Financial>): Promise<Financial> => {
-    const response = await apiClient.put<Financial>(`/financials/${id}`, data);
-    return response.data;
-  },
-
-  getStatistics: async (): Promise<{
-    total_donations: number;
-    total_allocations: number;
-    total_expenses: number;
-    total_value: number;
-  }> => {
-    const response = await apiClient.get('/financials/statistics');
-    return response.data;
-  },
-};
-
 // Audit Trails API
 export const auditTrailApi = {
   getAll: async (params?: { 
@@ -932,6 +742,31 @@ export const donationApi = {
 
   assignWarehouse: async (id: number, data: { warehouse_id: number; colocation_facility?: string; colocation_sub_location?: string }): Promise<Donation> => {
     const response = await apiClient.put<Donation>(`/donations/${id}/assign-warehouse`, data);
+    return response.data;
+  },
+
+  /** Donor: confirm Paystack reference (amount must match donation). */
+  verifyPaystackPayment: async (payload: {
+    reference: string;
+    donation_id?: number;
+    type?: 'Donation' | 'Project Funding' | 'General Support';
+    /** Required when type is Project Funding (server enforces ceiling). */
+    project_id?: number;
+  }): Promise<{ message: string; financial?: unknown }> => {
+    const response = await apiClient.post<{ message: string; financial?: unknown }>('/payments/verify', {
+      reference: payload.reference,
+      type: payload.type ?? 'Donation',
+      donation_id: payload.donation_id,
+      project_id: payload.project_id,
+    });
+    return response.data;
+  },
+
+  /** Admin: verify Paystack reference against a specific pending monetary donation. */
+  verifyMonetaryAsAdmin: async (donationId: number, reference: string): Promise<{ message: string }> => {
+    const response = await apiClient.post<{ message: string }>(`/donations/${donationId}/verify-monetary-payment`, {
+      reference,
+    });
     return response.data;
   },
 
@@ -1145,6 +980,28 @@ export const projectApi = {
 
   submit: async (id: number): Promise<{ project: Project; message: string }> => {
     const response = await apiClient.post<{ project: Project; message: string }>(`/projects/${id}/submit`);
+    return response.data;
+  },
+
+  verifyFundingCeilingAdmin: async (
+    id: number,
+    data: { verified_ceiling_ghs: number; notes?: string }
+  ): Promise<{ project: Project; message: string }> => {
+    const response = await apiClient.post<{ project: Project; message: string }>(
+      `/projects/${id}/verify-funding-ceiling-admin`,
+      data
+    );
+    return response.data;
+  },
+
+  verifyFundingCeilingAuditor: async (
+    id: number,
+    data?: { verified_ceiling_ghs?: number; notes?: string }
+  ): Promise<{ project: Project; message: string }> => {
+    const response = await apiClient.post<{ project: Project; message: string }>(
+      `/projects/${id}/verify-funding-ceiling-auditor`,
+      data ?? {}
+    );
     return response.data;
   },
 };

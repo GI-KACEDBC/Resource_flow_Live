@@ -61,6 +61,11 @@ class DonationController extends Controller
         $this->authorize('create', Donation::class);
         $validated = $request->validated();
 
+        // Monetary rows store amount in quantity; unit must not inherit physical goods (e.g. bags).
+        if (($validated['type'] ?? '') === 'Monetary') {
+            $validated['unit'] = 'GHS';
+        }
+
         $supplier = $request->user();
         $compliance = app(DonationComplianceService::class);
 
@@ -186,6 +191,11 @@ class DonationController extends Controller
             ], 502);
         }
 
+        $paystackRef = $paystackData['data']['reference'] ?? null;
+        if ($paystackRef) {
+            $donation->update(['paystack_reference' => $paystackRef]);
+        }
+
         return response()->json([
             'message' => 'Redirect to Paystack to complete payment.',
             'authorization_url' => $authorizationUrl,
@@ -258,7 +268,7 @@ class DonationController extends Controller
     {
         $this->authorize('lockPrice', $donation);
         $validated = $request->validate([
-            'audited_price' => 'required|numeric|min:0',
+            'audited_price' => 'required|numeric|min:0|max:' . StoreDonationRequest::MAX_NUMERIC_10_2,
             'auditor_notes' => 'nullable|string',
         ]);
 

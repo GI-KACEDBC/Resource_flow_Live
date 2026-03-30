@@ -5,18 +5,12 @@ namespace Database\Seeders;
 use Illuminate\Database\Seeder;
 
 /**
- * Seeds the application for fresh deployment.
- * Only the Super Admin user is created – no sample data.
+ * Default seeder — no demo data. Create users and records via the app or migrations as needed.
  */
 class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
-        $this->call([
-            UserSeeder::class,
-            WarehouseSeeder::class,
-            LogisticsSeeder::class,
-            NGOSeeder::class,
-        ]);
+        //
     }
 }

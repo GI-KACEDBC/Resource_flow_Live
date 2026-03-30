@@ -16,7 +16,7 @@ class AllocationController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = Allocation::query()->forUser($request->user())
-            ->with(['request.user', 'donation', 'allocator', 'logistics']);
+            ->with(['request.user', 'donation.user', 'donation', 'allocator', 'logistics']);
 
         if ($request->has('status')) {
             $query->where('status', $request->status);
@@ -62,12 +62,15 @@ class AllocationController extends Controller
             // Fix #8: Validate quantity doesn't exceed available
             $donation = \App\Models\Donation::lockForUpdate()->findOrFail($validated['donation_id']);
 
-            // Calculate total already allocated
+            // Calculate total already allocated (for donations without remaining_quantity)
             $totalAllocated = Allocation::where('donation_id', $validated['donation_id'])
                 ->where('id', '!=', $request->input('existing_allocation_id', 0)) // Exclude current if updating
                 ->sum('quantity_allocated');
 
-            $available = $donation->quantity - $totalAllocated;
+            // Prefer remaining_quantity when present (stays in sync with partial allocations)
+            $available = $donation->remaining_quantity !== null
+                ? (float) $donation->remaining_quantity
+                : (float) $donation->quantity - (float) $totalAllocated;
 
             if ($validated['quantity_allocated'] > $available) {
                 return response()->json([

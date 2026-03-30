@@ -3,7 +3,12 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { Package, Download, Filter, Loader2 } from 'lucide-react';
 import { formatGHC } from '../../utils/currency';
-import { donationApi, warehouseApi } from '../../services/api';
+import { allocationApi, warehouseApi } from '../../services/api';
+import {
+  allocationLineForReport,
+  isActiveAllocationForCashValue,
+  reportLineUnitPrice,
+} from '../../utils/allocatedFinancials';
 import { downloadCsv } from '../../utils/exportCsv';
 import { ResourceValueChart } from '../../components/charts/ResourceValueChart';
 import { Button } from '../../components/ui/Button';
@@ -19,7 +24,7 @@ const deriveCategory = (item) => {
 };
 
 const FinancialReports = () => {
-  const [donations, setDonations] = useState([]);
+  const [allocations, setAllocations] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -31,16 +36,16 @@ const FinancialReports = () => {
       try {
         setLoading(true);
         setError(null);
-        const [donationsData, warehousesData] = await Promise.all([
-          donationApi.getAll({ receipt_confirmed: true }),
+        const [allocationsData, warehousesData] = await Promise.all([
+          allocationApi.getAll().catch(() => []),
           warehouseApi.getAll(),
         ]);
-        setDonations(Array.isArray(donationsData) ? donationsData : []);
+        setAllocations(Array.isArray(allocationsData) ? allocationsData : []);
         setWarehouses(Array.isArray(warehousesData) ? warehousesData : []);
       } catch (err) {
         console.error('Error fetching financial data:', err);
         setError('Failed to load financial data.');
-        setDonations([]);
+        setAllocations([]);
         setWarehouses([]);
       } finally {
         setLoading(false);
@@ -49,76 +54,84 @@ const FinancialReports = () => {
     fetchData();
   }, []);
 
-  // ## Goods donations only (inventory value)
-  const inventory = useMemo(
-    () => donations.filter((d) => d.type === 'Goods'),
-    [donations]
+  /** Goods, services, and monetary (GHS) allocations — same scope as dashboard cash-equivalent totals. */
+  const activeAllocations = useMemo(
+    () => allocations.filter(isActiveAllocationForCashValue),
+    [allocations]
   );
 
-  // ## Calculate financial metrics from donations
+  /** Apply category filter to all allocation-based metrics and the detail table. */
+  const scopedAllocations = useMemo(() => {
+    if (selectedCategory === 'All') return activeAllocations;
+    return activeAllocations.filter((a) => deriveCategory(a.donation?.item) === selectedCategory);
+  }, [activeAllocations, selectedCategory]);
+
   const financialMetrics = useMemo(() => {
-    const totalLockedValue = inventory
-      .filter((d) => d.price_status === 'Locked' && (d.audited_price || d.value))
-      .reduce((sum, d) => sum + ((d.audited_price || d.value || 0) * (d.quantity || 0)), 0);
+    let totalLockedValue = 0;
+    let totalEstimatedValue = 0;
+    const valueByCategory = {};
 
-    const totalEstimatedValue = inventory.reduce((sum, d) => {
-      const price = d.market_price || d.audited_price || d.value;
-      return sum + (price ? price * (d.quantity || 0) : 0);
-    }, 0);
-
-    const valueByCategory = inventory.reduce((acc, d) => {
+    scopedAllocations.forEach((a) => {
+      const { locked, estimated } = allocationLineForReport(a);
+      totalLockedValue += locked;
+      totalEstimatedValue += estimated;
+      const d = a.donation;
+      if (!d) return;
       const category = deriveCategory(d.item);
-      const value = d.price_status === 'Locked' && (d.audited_price || d.value)
-        ? (d.audited_price || d.value) * (d.quantity || 0)
-        : (d.market_price || d.audited_price || d.value || 0) * (d.quantity || 0);
-
-      if (!acc[category]) acc[category] = { locked: 0, estimated: 0, total: 0 };
-      if (d.price_status === 'Locked' && (d.audited_price || d.value)) {
-        acc[category].locked += (d.audited_price || d.value) * (d.quantity || 0);
-      } else if (d.market_price || d.audited_price || d.value) {
-        acc[category].estimated += (d.market_price || d.audited_price || d.value) * (d.quantity || 0);
+      if (!valueByCategory[category]) {
+        valueByCategory[category] = { locked: 0, estimated: 0, total: 0 };
       }
-      acc[category].total += value;
-      return acc;
-    }, {});
+      valueByCategory[category].locked += locked;
+      valueByCategory[category].estimated += estimated;
+      valueByCategory[category].total += locked + estimated;
+    });
 
     const valueByStatus = {
-      Locked: inventory
-        .filter((d) => d.price_status === 'Locked' && (d.audited_price || d.value))
-        .reduce((sum, d) => sum + ((d.audited_price || d.value) * (d.quantity || 0)), 0),
-      'Pending Review': inventory
-        .filter((d) => d.price_status === 'Pending Review' && (d.market_price || d.audited_price || d.value))
-        .reduce((sum, d) => sum + ((d.market_price || d.audited_price || d.value || 0) * (d.quantity || 0)), 0),
-      Estimated: inventory
-        .filter((d) => d.price_status === 'Estimated' && (d.market_price || d.audited_price || d.value))
-        .reduce((sum, d) => sum + ((d.market_price || d.audited_price || d.value || 0) * (d.quantity || 0)), 0),
+      Locked: 0,
+      'Pending Review': 0,
+      Estimated: 0,
     };
+    const itemsByStatus = { Locked: 0, 'Pending Review': 0, Estimated: 0 };
+
+    scopedAllocations.forEach((a) => {
+      const d = a.donation;
+      if (!d) return;
+      const { locked, estimated } = allocationLineForReport(a);
+      const ps = d.price_status;
+      if (ps === 'Locked') {
+        valueByStatus.Locked += locked + estimated;
+        itemsByStatus.Locked += 1;
+      } else if (ps === 'Pending Review') {
+        valueByStatus['Pending Review'] += locked + estimated;
+        itemsByStatus['Pending Review'] += 1;
+      } else if (ps === 'Estimated') {
+        valueByStatus.Estimated += locked + estimated;
+        itemsByStatus.Estimated += 1;
+      }
+    });
 
     const valueByWarehouse = warehouses.map((w) => {
-      const warehouseItems = inventory.filter(
-        (d) => d.warehouse?.name === w.name || d.colocation_facility === w.name
+      const warehouseAllocations = scopedAllocations.filter(
+        (a) =>
+          a.donation &&
+          (a.donation.warehouse?.name === w.name || a.donation.colocation_facility === w.name)
       );
-      const lockedValue = warehouseItems
-        .filter((d) => d.price_status === 'Locked' && (d.audited_price || d.value))
-        .reduce((sum, d) => sum + ((d.audited_price || d.value) * (d.quantity || 0)), 0);
-      const estimatedValue = warehouseItems
-        .filter((d) => d.price_status !== 'Locked' && (d.market_price || d.audited_price || d.value))
-        .reduce((sum, d) => sum + ((d.market_price || d.audited_price || d.value || 0) * (d.quantity || 0)), 0);
+      let lockedValue = 0;
+      let estimatedValue = 0;
+      warehouseAllocations.forEach((a) => {
+        const { locked, estimated } = allocationLineForReport(a);
+        lockedValue += locked;
+        estimatedValue += estimated;
+      });
       return {
         name: w.name,
         region: w.region || '',
         lockedValue,
         estimatedValue,
         totalValue: lockedValue + estimatedValue,
-        itemCount: warehouseItems.length,
+        itemCount: warehouseAllocations.length,
       };
     });
-
-    const itemsByStatus = {
-      Locked: inventory.filter((d) => d.price_status === 'Locked').length,
-      'Pending Review': inventory.filter((d) => d.price_status === 'Pending Review').length,
-      Estimated: inventory.filter((d) => d.price_status === 'Estimated').length,
-    };
 
     return {
       totalLockedValue,
@@ -129,7 +142,7 @@ const FinancialReports = () => {
       valueByWarehouse,
       itemsByStatus,
     };
-  }, [inventory, warehouses]);
+  }, [scopedAllocations, warehouses]);
 
   // ## Prepare chart data
   const chartData = useMemo(() => {
@@ -141,18 +154,11 @@ const FinancialReports = () => {
     }));
   }, [financialMetrics.valueByCategory]);
 
-  // ## Filter warehouse data by category
-  const filteredWarehouses =
-    selectedCategory === 'All'
-      ? financialMetrics.valueByWarehouse
-      : financialMetrics.valueByWarehouse.filter((wh) => {
-          const items = inventory.filter(
-            (d) =>
-              (d.warehouse?.name === wh.name || d.colocation_facility === wh.name) &&
-              deriveCategory(d.item) === selectedCategory
-          );
-          return items.length > 0;
-        });
+  const filteredWarehouses = useMemo(() => {
+    const rows = financialMetrics.valueByWarehouse;
+    if (selectedCategory === 'All') return rows;
+    return rows.filter((wh) => wh.totalValue > 0 || wh.itemCount > 0);
+  }, [financialMetrics.valueByWarehouse, selectedCategory]);
 
   // ## Export financial report as CSV
   const handleExport = () => {
@@ -166,7 +172,10 @@ const FinancialReports = () => {
     rows.push(['Total Locked Value', formatGHC(financialMetrics.totalLockedValue)]);
     rows.push(['Total Estimated Value', formatGHC(financialMetrics.totalEstimatedValue)]);
     rows.push(['Total Asset Value', formatGHC(financialMetrics.totalValue)]);
-    rows.push(['Verification Rate', `${inventory.length > 0 ? safePercent((financialMetrics.itemsByStatus.Locked / inventory.length) * 100) : 0}%`]);
+    rows.push([
+      'Verification Rate',
+      `${scopedAllocations.length > 0 ? safePercent((financialMetrics.itemsByStatus.Locked / scopedAllocations.length) * 100) : 0}%`,
+    ]);
     rows.push([]);
 
     // Value by status
@@ -190,6 +199,52 @@ const FinancialReports = () => {
       .forEach((wh) => {
         rows.push([wh.name, wh.region, formatGHC(wh.lockedValue), formatGHC(wh.estimatedValue), formatGHC(wh.totalValue), `${wh.itemCount} items`]);
       });
+
+    rows.push([]);
+    rows.push(['ALLOCATION LINES (allocated quantity × unit price — not full donation stock)']);
+    rows.push([
+      'Allocation ID',
+      'Date allocated',
+      'Donation item',
+      'Donor',
+      'Aid request',
+      'Qty allocated',
+      'Unit',
+      'Unit price GHS',
+      'Locked GHS',
+      'Estimated GHS',
+      'Line total GHS',
+      'Price status',
+      'Allocation status',
+      'Category',
+    ]);
+    scopedAllocations.forEach((a) => {
+      const d = a.donation;
+      if (!d) return;
+      const { locked, estimated } = allocationLineForReport(a);
+      const lineTotal = locked + estimated;
+      const unit = reportLineUnitPrice(a, lineTotal);
+      const donor = a.donation?.user?.name || a.donation?.user?.email || '';
+      rows.push([
+        String(a.id),
+        String((a.allocated_date || a.created_at || '').slice(0, 10)),
+        d.item || '',
+        donor,
+        a.request?.title || '',
+        String(a.quantity_allocated ?? ''),
+        d.unit || '',
+        unit.toFixed(2),
+        locked.toFixed(2),
+        estimated.toFixed(2),
+        lineTotal.toFixed(2),
+        d.price_status || '',
+        a.status || '',
+        deriveCategory(d.item),
+      ]);
+    });
+    rows.push([]);
+    rows.push(['Lines in export', String(scopedAllocations.length)]);
+    rows.push(['Total allocated value GHS (sum of line totals)', financialMetrics.totalValue.toFixed(2)]);
 
     downloadCsv(`financial-report-${date}`, rows);
   };
@@ -227,7 +282,10 @@ const FinancialReports = () => {
       <div className="flex justify-between items-center mb-6">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Financial Reports</h2>
-          <p className="text-slate-600 mt-1">Comprehensive financial analytics and reporting</p>
+          <p className="text-slate-600 mt-1">
+            Allocated goods, services, and cash (GHS) — line values use allocated quantity × unit price (or GHS amount for
+            monetary donations), not full donation stock.
+          </p>
         </div>
         <div className="flex gap-3">
           <div className="flex items-center gap-2">
@@ -267,19 +325,104 @@ const FinancialReports = () => {
         </div>
 
         <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <p className="text-sm text-slate-600">Total Asset Value</p>
+          <p className="text-sm text-slate-600">Total allocated value (received)</p>
           <p className="text-xl font-bold text-blue-600 mt-1">
             {formatGHC(financialMetrics.totalValue)}
           </p>
+          <p className="text-xs text-slate-500 mt-1">Sum of allocation line values in current filter</p>
         </div>
 
         <div className="bg-white border border-slate-200 rounded-xl p-4">
           <p className="text-sm text-slate-600">Verification Rate</p>
           <p className="text-xl font-bold text-purple-600 mt-1">
-            {inventory.length > 0
-              ? safePercent((financialMetrics.itemsByStatus.Locked / inventory.length) * 100)
+            {scopedAllocations.length > 0
+              ? safePercent((financialMetrics.itemsByStatus.Locked / scopedAllocations.length) * 100)
               : 0}%
           </p>
+        </div>
+      </div>
+
+      {/* Allocation lines — full view */}
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden mb-6">
+        <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="font-bold text-slate-800">Allocations</h3>
+            <p className="text-sm text-slate-600 mt-1">
+              {scopedAllocations.length} line{scopedAllocations.length === 1 ? '' : 's'} · Total{' '}
+              <span className="font-semibold text-slate-800">{formatGHC(financialMetrics.totalValue)}</span> received
+              (allocated qty × unit price per donation)
+            </p>
+          </div>
+        </div>
+        <div className="overflow-x-auto max-h-[480px] overflow-y-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 border-b border-slate-200 sticky top-0">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">ID</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Date</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Item</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Donor</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Request</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Qty</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Unit</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Unit GHS</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Locked</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Est.</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Line total</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Price</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {scopedAllocations.length === 0 ? (
+                <tr>
+                  <td colSpan={13} className="px-4 py-10 text-center text-slate-500">
+                    No allocations match the current filter.
+                  </td>
+                </tr>
+              ) : (
+                [...scopedAllocations]
+                  .filter((a) => a.donation)
+                  .sort(
+                    (a, b) =>
+                      new Date(b.allocated_date || b.created_at).getTime() -
+                      new Date(a.allocated_date || a.created_at).getTime()
+                  )
+                  .map((a) => {
+                    const d = a.donation;
+                    const { locked, estimated } = allocationLineForReport(a);
+                    const lineTotal = locked + estimated;
+                    const unit = reportLineUnitPrice(a, lineTotal);
+                    const donor = d.user?.name || d.user?.email || '—';
+                    return (
+                      <tr key={a.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-2 text-slate-700">{a.id}</td>
+                        <td className="px-4 py-2 text-slate-600 whitespace-nowrap">
+                          {new Date(a.allocated_date || a.created_at).toLocaleDateString('en-GB')}
+                        </td>
+                        <td className="px-4 py-2 text-slate-900 max-w-[200px]">{d.item}</td>
+                        <td className="px-4 py-2 text-slate-600 max-w-[140px] truncate" title={donor}>
+                          {donor}
+                        </td>
+                        <td className="px-4 py-2 text-slate-600 max-w-[160px] truncate" title={a.request?.title}>
+                          {a.request?.title || '—'}
+                        </td>
+                        <td className="px-4 py-2 text-right tabular-nums">{Number(a.quantity_allocated).toLocaleString('en-GH')}</td>
+                        <td className="px-4 py-2 text-slate-600">{d.unit || '—'}</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{formatGHC(unit)}</td>
+                        <td className="px-4 py-2 text-right text-emerald-700 tabular-nums">{formatGHC(locked)}</td>
+                        <td className="px-4 py-2 text-right text-amber-700 tabular-nums">{formatGHC(estimated)}</td>
+                        <td className="px-4 py-2 text-right font-semibold text-slate-900 tabular-nums">
+                          {formatGHC(lineTotal)}
+                        </td>
+                        <td className="px-4 py-2 text-slate-600">{d.price_status}</td>
+                        <td className="px-4 py-2 text-slate-600">{a.status}</td>
+                      </tr>
+                    );
+                  })
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -407,8 +550,8 @@ const FinancialReports = () => {
             <div className="flex justify-between items-center">
               <span className="text-sm text-slate-600">Verification Coverage</span>
               <span className="text-sm font-bold text-slate-900">
-                {inventory.length > 0
-                  ? safePercent((financialMetrics.itemsByStatus.Locked / inventory.length) * 100)
+                {activeAllocations.length > 0
+                  ? safePercent((financialMetrics.itemsByStatus.Locked / activeAllocations.length) * 100)
                   : 0}%
               </span>
             </div>
@@ -423,8 +566,8 @@ const FinancialReports = () => {
             <div className="flex justify-between items-center">
               <span className="text-sm text-slate-600">Average Item Value</span>
               <span className="text-sm font-bold text-slate-900">
-                {inventory.length > 0
-                  ? formatGHC(financialMetrics.totalValue / inventory.length)
+                {scopedAllocations.length > 0
+                  ? formatGHC(financialMetrics.totalValue / scopedAllocations.length)
                   : formatGHC(0)}
               </span>
             </div>

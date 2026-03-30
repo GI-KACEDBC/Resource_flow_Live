@@ -8,8 +8,9 @@ import { DonationTracker } from '../../components/shared/DonationTracker';
 import { CorporateTaxWidget } from '../../components/donor/CorporateTaxWidget';
 import { StatusBadge } from '../../components/shared/StatusBadge';
 import { Button } from '../../components/ui/Button';
+import { Input } from '../../components/ui/Input';
 import { GhanaSVGHeatMap } from '../../components/map/GhanaSVGHeatMap';
-import { donationApi } from '../../services/api';
+import apiClient, { donationApi, fetchSanctumCsrfCookie } from '../../services/api';
 import PaymentModal from '../../components/payment/PaymentModal';
 
 const SupplierDashboard = () => {
@@ -22,6 +23,8 @@ const SupplierDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [paymentSuccessBanner, setPaymentSuccessBanner] = useState(false);
+  const [donorPaystackRefs, setDonorPaystackRefs] = useState({});
+  const [donorVerifyingId, setDonorVerifyingId] = useState(null);
 
   // ## Fetch donations from API
   useEffect(() => {
@@ -51,6 +54,16 @@ const SupplierDashboard = () => {
   }, [user?.id]);
 
   // ## Calculate stats from donations
+  const pendingMonetaryDonations = React.useMemo(
+    () =>
+      donations.filter(
+        (d) =>
+          d.type === 'Monetary' &&
+          (d.status === 'Pending' || d.status === 'pending')
+      ),
+    [donations]
+  );
+
   const stats = React.useMemo(() => {
     const totalDonations = donations.length;
     const verified = donations.filter(d => d.status === 'verified' || d.status === 'Verified').length;
@@ -66,6 +79,25 @@ const SupplierDashboard = () => {
   }, [donations]);
 
   // ## Handle user interactions - unverified users go to verification-wait
+  const handleDonorVerifyPaystack = async (donationId) => {
+    const ref = (donorPaystackRefs[donationId] || '').trim();
+    if (!ref) {
+      alert('Enter the Paystack transaction reference (from Paystack receipt or dashboard).');
+      return;
+    }
+    try {
+      setDonorVerifyingId(donationId);
+      await fetchSanctumCsrfCookie();
+      await donationApi.verifyPaystackPayment({ reference: ref, donation_id: donationId });
+      await refreshDonations();
+      setDonorPaystackRefs((prev) => ({ ...prev, [donationId]: '' }));
+    } catch (err) {
+      alert(err?.response?.data?.message || err?.message || 'Verification failed.');
+    } finally {
+      setDonorVerifyingId(null);
+    }
+  };
+
   const handleMakeDonation = () => {
     if (!isVerified) {
       navigate('/verification-wait');
@@ -74,8 +106,8 @@ const SupplierDashboard = () => {
     navigate('/dashboard/donate');
   };
 
-  // ## Refresh donations after creating a new one
-  const refreshDonations = async () => {
+  // ## Refresh donations after creating a new one (stable ref for Paystack return effect)
+  const refreshDonations = React.useCallback(async () => {
     if (!user?.id) return;
     try {
       const data = await donationApi.getAll({ user_id: user.id });
@@ -84,19 +116,40 @@ const SupplierDashboard = () => {
     } catch (err) {
       console.error('Error refreshing donations:', err);
     }
-  };
+  }, [user?.id]);
 
-  // ## Handle Paystack return: refresh donations and show success
+  // ## Paystack redirect flow: callback is /dashboard?payment=success&reference=… — must verify server-side (webhook may be delayed / local dev).
   useEffect(() => {
     const payment = searchParams.get('payment');
-    if (payment === 'success' && user?.id) {
+    const ref = searchParams.get('reference') || searchParams.get('trxref');
+    if (payment !== 'success' || !user?.id) return;
+
+    let cancelled = false;
+
+    (async () => {
+      if (ref) {
+        try {
+          await fetchSanctumCsrfCookie();
+          await apiClient.post('/payments/verify', {
+            reference: ref,
+            type: 'Donation',
+          });
+        } catch (err) {
+          console.error('Paystack verify failed:', err);
+        }
+      }
+      if (cancelled) return;
       setPaymentSuccessBanner(true);
-      refreshDonations();
+      await refreshDonations();
       setSearchParams({}, { replace: true });
-      const t = setTimeout(() => setPaymentSuccessBanner(false), 5000);
-      return () => clearTimeout(t);
-    }
-  }, [searchParams, user?.id]);
+    })();
+
+    const t = setTimeout(() => setPaymentSuccessBanner(false), 5000);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [searchParams, user?.id, refreshDonations]);
 
   // ## Listen for donation creation and refresh
   useEffect(() => {
@@ -258,6 +311,51 @@ const SupplierDashboard = () => {
           <div className="flex items-center gap-2">
             <AlertCircle className="text-red-600" size={20} />
             <p className="text-red-700">{error}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Paystack verify — if redirect/webhook did not update status */}
+      {!loading && pendingMonetaryDonations.length > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
+          <h3 className="text-lg font-bold text-slate-800 mb-1">Pending cash — enter Paystack reference</h3>
+          <p className="text-sm text-slate-600 mb-4">
+            If you completed payment on Paystack but this donation still shows Pending, paste the transaction reference
+            from the Paystack dashboard or receipt. Amount must match (GHS).
+          </p>
+          <div className="space-y-4">
+            {pendingMonetaryDonations.map((d) => (
+              <div
+                key={d.id}
+                className="flex flex-col sm:flex-row sm:items-end gap-3 p-4 bg-white rounded-lg border border-blue-100"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-slate-900">{d.item}</p>
+                  <p className="text-sm text-slate-500">
+                    Expected: {Number(d.quantity).toLocaleString('en-GH', { minimumFractionDigits: 2 })} GHS
+                  </p>
+                </div>
+                <div className="flex-1 sm:max-w-md">
+                  <Input
+                    label="Paystack reference"
+                    type="text"
+                    placeholder="e.g. T1234567890"
+                    value={donorPaystackRefs[d.id] ?? ''}
+                    onChange={(e) =>
+                      setDonorPaystackRefs((prev) => ({ ...prev, [d.id]: e.target.value }))
+                    }
+                  />
+                </div>
+                <Button
+                  type="button"
+                  onClick={() => handleDonorVerifyPaystack(d.id)}
+                  disabled={donorVerifyingId === d.id}
+                  icon={CheckCircle}
+                >
+                  {donorVerifyingId === d.id ? 'Verifying…' : 'Verify payment'}
+                </Button>
+              </div>
+            ))}
           </div>
         </div>
       )}

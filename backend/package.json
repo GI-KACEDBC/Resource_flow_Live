@@ -1,0 +1,11 @@
+{
+  "name": "resourceflow-backend-tests",
+  "private": true,
+  "description": "Playwright server for Pest Browser (pestphp/pest-plugin-browser). Run npm install here, then npx playwright install.",
+  "devDependencies": {
+    "playwright": "^1.50.0"
+  },
+  "scripts": {
+    "playwright:install": "playwright install"
+  }
+}

@@ -23,6 +23,7 @@ class Donation extends Model
         'unit',
         'description',
         'status',
+        'paystack_reference',
         'date_received',
         'receipt_confirmed_at',
         'receipt_confirmed_by',

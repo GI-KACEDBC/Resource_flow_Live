@@ -8,6 +8,16 @@ export interface Project {
   need_type: 'funding' | 'items' | 'both';
   sdg_goals: number[]; // Array of SDG goal numbers (1-17)
   budget: number | null;
+  target_amount?: number | null;
+  raised_amount?: number;
+  estimated_total_value?: number | null;
+  verified_ceiling_ghs?: number | null;
+  admin_verified_value_at?: string | null;
+  admin_verified_value_by?: number | null;
+  admin_value_notes?: string | null;
+  auditor_verified_value_at?: string | null;
+  auditor_verified_value_by?: number | null;
+  auditor_value_notes?: string | null;
   funded_amount: number;
   impact_metrics: ImpactMetrics | null;
   location: string | null;
@@ -22,6 +32,8 @@ export interface Project {
   // Relationships
   ngo?: User;
   verifier?: User;
+  admin_value_verifier?: User;
+  auditor_value_verifier?: User;
   project_items?: ProjectItem[];
   csr_partnerships?: CSRPartnership[];
   funding_progress?: number;

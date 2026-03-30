@@ -1,40 +1,41 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\Api\UrgencyController;
-use App\Http\Controllers\Api\RequestController;
-use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\WarehouseController;
-use App\Http\Controllers\Api\VulnerabilityScoreController;
 use App\Http\Controllers\Api\AllocationController;
-use App\Http\Controllers\Api\DeliveryRouteController;
-use App\Http\Controllers\Api\LogisticController;
-use App\Http\Controllers\Api\VerificationDocumentController;
-use App\Http\Controllers\Api\FinancialController;
 use App\Http\Controllers\Api\AuditTrailController;
-use App\Http\Controllers\Api\DonationController;
-use App\Http\Controllers\Api\DonationCertificateController;
+use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ContributionController;
-use App\Http\Controllers\Api\PaymentController;
-use App\Http\Controllers\Api\FileUploadController;
-use App\Http\Controllers\Api\MatchmakingController;
-use App\Http\Controllers\Api\ImpactDashboardController;
-use App\Http\Controllers\Api\ProjectController;
-use App\Http\Controllers\Api\OrganizationController;
 use App\Http\Controllers\Api\CSRPartnershipController;
-use App\Http\Controllers\Api\NGOVerificationController;
-use App\Http\Controllers\Api\ImpactProofController;
-use App\Http\Controllers\Api\MapController;
+use App\Http\Controllers\Api\DeliveryRouteController;
+use App\Http\Controllers\Api\DonationCertificateController;
+use App\Http\Controllers\Api\DonationController;
+use App\Http\Controllers\Api\FileUploadController;
+use App\Http\Controllers\Api\FinancialController;
 use App\Http\Controllers\Api\GhanaCardVerificationController;
-use App\Http\Controllers\Api\UserManagementController;
-use App\Http\Controllers\Api\UserController;
-use App\Http\Controllers\Api\TripController;
 use App\Http\Controllers\Api\HealthController;
+use App\Http\Controllers\Api\ImpactDashboardController;
+use App\Http\Controllers\Api\ImpactProofController;
+use App\Http\Controllers\Api\LogisticController;
+use App\Http\Controllers\Api\MapController;
+use App\Http\Controllers\Api\MatchmakingController;
+use App\Http\Controllers\Api\NGOVerificationController;
+use App\Http\Controllers\Api\OrganizationController;
+use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\ProjectController;
+use App\Http\Controllers\Api\RequestController;
+use App\Http\Controllers\Api\TripController;
+use App\Http\Controllers\Api\UrgencyController;
+use App\Http\Controllers\Api\UserController;
+use App\Http\Controllers\Api\UserManagementController;
+use App\Http\Controllers\Api\VerificationDocumentController;
+use App\Http\Controllers\Api\VulnerabilityScoreController;
+use App\Http\Controllers\Api\WarehouseController;
+use Illuminate\Support\Facades\Route;
 
 // Health check (for deployment verification)
 Route::get('/health', [HealthController::class]);
 
 // Public routes
+Route::middleware('throttle:10,1')->post('/auth/register/send-otp', [AuthController::class, 'sendRegistrationOtp']);
 Route::post('/auth/register', [AuthController::class, 'register']);
 Route::post('/auth/login', [AuthController::class, 'login']);
 Route::post('/auth/change-expired-password', [AuthController::class, 'changeExpiredPassword']);
@@ -57,6 +58,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
 Route::middleware(['auth:sanctum', 'password.expired'])->group(function () {
     Route::get('/auth/me', [AuthController::class, 'me']);
+    Route::post('/auth/acknowledge-unverified-dashboard', [AuthController::class, 'acknowledgeUnverifiedDashboard']);
 
     // QoreID SDK result (requires auth - stores verification for current user)
     Route::middleware('throttle:10,1')->post('/verify-ghana-card-qoreid-result', [GhanaCardVerificationController::class, 'storeQoreIdResult']);
@@ -66,7 +68,7 @@ Route::middleware(['auth:sanctum', 'password.expired'])->group(function () {
     Route::get('/users/{user}', [UserController::class, 'show']);
     Route::put('/users/{user}', [UserController::class, 'update']);
     Route::post('/auth/change-password', [AuthController::class, 'changePassword']);
-    
+
     // Requests - define literal paths BEFORE apiResource so they are not matched as {id}
     Route::get('/requests/available', [RequestController::class, 'getAvailableRequests']);
     Route::get('/supplier/available-requests', [RequestController::class, 'getAvailableRequests']); // Alias to avoid route conflict
@@ -86,26 +88,26 @@ Route::middleware(['auth:sanctum', 'password.expired'])->group(function () {
     Route::get('/requests/{id}', [RequestController::class, 'show']);
     Route::put('/requests/{id}', [RequestController::class, 'update']);
     Route::delete('/requests/{id}', [RequestController::class, 'destroy']);
-    
+
     // Contributions (Partial Funding)
     Route::apiResource('contributions', ContributionController::class);
     Route::get('/contributions/request/{requestId}/stats', [ContributionController::class, 'getRequestStats']); // Get contribution stats for a request
-    
+
     // Warehouses
     Route::apiResource('warehouses', WarehouseController::class);
-    
+
     // Vulnerability Scores
     Route::apiResource('vulnerability-scores', VulnerabilityScoreController::class);
     Route::get('/vulnerability-scores/user/{userId}', [VulnerabilityScoreController::class, 'getByUser']);
     Route::get('/vulnerability-scores/priority-list', [VulnerabilityScoreController::class, 'getPriorityList']);
-    
+
     // Allocations - define literal path BEFORE apiResource so it is not matched as {id}
     Route::get('/allocations/prioritized-requests', [AllocationController::class, 'getPrioritizedRequests']);
     Route::apiResource('allocations', AllocationController::class);
-    
+
     // Delivery Routes
     Route::apiResource('delivery-routes', DeliveryRouteController::class);
-    
+
     // Trips - Real-time driver tracking & last-mile verification
     Route::apiResource('trips', TripController::class);
     Route::put('/trips/{trip}/update-location', [TripController::class, 'updateLocation']);
@@ -117,18 +119,19 @@ Route::middleware(['auth:sanctum', 'password.expired'])->group(function () {
     Route::get('/logistics/track/{trackingNumber}', [LogisticController::class, 'track']);
     Route::post('/logistics/{logistic}/update-location', [LogisticController::class, 'updateLocation']);
     Route::post('/logistics/{logistic}/complete-delivery', [LogisticController::class, 'completeDelivery']);
-    
+
     // Verification Documents
     Route::post('/verification-documents/admin-review', [VerificationDocumentController::class, 'storeForAdminReview']);
     Route::apiResource('verification-documents', VerificationDocumentController::class);
     Route::post('/verification-documents/{verificationDocument}/verify', [VerificationDocumentController::class, 'verify']);
     Route::post('/verification-documents/{verificationDocument}/verify-via-qoreid', [VerificationDocumentController::class, 'verifyViaQoreid']);
     Route::get('/verification-documents/{verificationDocument}/download', [VerificationDocumentController::class, 'download']);
-    
+
     // Donations - requires verification for creation
     Route::get('/donations', [DonationController::class, 'index']);
     Route::get('/donations/corporate-tax-stats', [DonationController::class, 'corporateTaxStats']);
     Route::put('/donations/tax-profile', [DonationController::class, 'updateTaxProfile']);
+    Route::post('/donations/{donation}/verify-monetary-payment', [PaymentController::class, 'verifyMonetaryAsAdmin']);
     Route::get('/donations/{donation}', [DonationController::class, 'show']);
     Route::post('/donations', [DonationController::class, 'store'])->middleware('verified.user');
     Route::put('/donations/{donation}', [DonationController::class, 'update']);
@@ -136,47 +139,49 @@ Route::middleware(['auth:sanctum', 'password.expired'])->group(function () {
     Route::post('/donations/{donation}/confirm-receipt', [DonationController::class, 'confirmReceipt']);
     Route::put('/donations/{donation}/assign-warehouse', [DonationController::class, 'assignWarehouse']);
     Route::get('/donations/{donation}/certificate', [DonationCertificateController::class, '__invoke']);
-    
+
     // Financials - statistics must be before apiResource so /statistics isn't matched as {id}
     Route::get('/financials/statistics', [FinancialController::class, 'getStatistics']);
     Route::apiResource('financials', FinancialController::class);
-    
+
     // Audit Trails
     Route::apiResource('audit-trails', AuditTrailController::class);
     Route::get('/audit-trails/model/{modelType}/{modelId}', [AuditTrailController::class, 'getByModel']);
-    
+
     // Payments
     Route::post('/payments/verify', [PaymentController::class, 'verifyPayment']);
-    
+
     // File Uploads - with rate limiting
     Route::middleware('throttle:uploads')->post('/files/upload', [FileUploadController::class, 'upload']);
     Route::middleware('throttle:uploads-multiple')->post('/files/upload-multiple', [FileUploadController::class, 'uploadMultiple']);
     Route::get('/files/download', [FileUploadController::class, 'download']);
-    
+
     // CSR Matchmaking & Impact Tracking
     Route::prefix('matchmaking')->group(function () {
         Route::get('/ngos', [MatchmakingController::class, 'getNGOs']);
         Route::get('/matches', [MatchmakingController::class, 'getMatches']);
         Route::get('/project/{projectId}/matches', [MatchmakingController::class, 'getProjectMatches']);
     });
-    
+
     // Impact Dashboard (Corporate)
     Route::prefix('impact')->group(function () {
         Route::get('/dashboard', [ImpactDashboardController::class, 'getImpactData']);
     });
-    
+
     // Organizations (NGO profile)
     Route::get('/organization', [OrganizationController::class, 'show']);
     Route::post('/organization', [OrganizationController::class, 'store']);
     Route::put('/organization', [OrganizationController::class, 'update']);
 
-    // Projects (NGO, Corporate)
-    Route::apiResource('projects', ProjectController::class);
+    // Projects (NGO, Corporate) — literal routes before apiResource
     Route::post('/projects/{project}/submit', [ProjectController::class, 'submit']);
-    
+    Route::post('/projects/{project}/verify-funding-ceiling-admin', [ProjectController::class, 'verifyFundingCeilingAdmin']);
+    Route::post('/projects/{project}/verify-funding-ceiling-auditor', [ProjectController::class, 'verifyFundingCeilingAuditor']);
+    Route::apiResource('projects', ProjectController::class);
+
     // CSR Partnerships
     Route::apiResource('csr-partnerships', CSRPartnershipController::class);
-    
+
     // NGO Verification (Auditor)
     Route::prefix('ngo-verification')->group(function () {
         Route::get('/', [NGOVerificationController::class, 'index']);

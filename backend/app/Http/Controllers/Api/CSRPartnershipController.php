@@ -73,10 +73,23 @@ class CSRPartnershipController extends Controller
             ], 422);
         }
 
-        // Check if project is verified
-        if (!$project->is_verified) {
+        // Check if project is verified (legacy NGO project audit)
+        if (! $project->is_verified) {
             return response()->json([
                 'message' => 'Project must be verified by an auditor before funding',
+            ], 422);
+        }
+
+        if (! $project->hasDualVerifiedFundingCeiling()) {
+            return response()->json([
+                'message' => 'Funding commitments require an administrator and an auditor to verify the project funding ceiling (total estimated value) after reviewing documents.',
+            ], 422);
+        }
+
+        $commitAmount = (float) $request->funding_amount;
+        if ($project->totalRaisedGhs() + $commitAmount > (float) $project->verified_ceiling_ghs + 0.02) {
+            return response()->json([
+                'message' => 'This commitment would exceed the verified project funding ceiling (GH₵'.number_format((float) $project->verified_ceiling_ghs, 2).').',
             ], 422);
         }
 
@@ -96,9 +109,10 @@ class CSRPartnershipController extends Controller
             // Update project funded amount
             $project->increment('funded_amount', $request->funding_amount);
 
-            // If fully funded, update status
-            if ($project->funded_amount >= $project->budget) {
-                $project->update(['status' => 'completed']);
+            $project->refresh();
+            $ceiling = (float) $project->verified_ceiling_ghs;
+            if ($ceiling > 0 && $project->totalRaisedGhs() >= $ceiling - 0.02) {
+                $project->update(['status' => 'fully_funded']);
             }
 
             DB::commit();

@@ -71,38 +71,25 @@ import TripsListPage from './pages/driver/TripsListPage';
 // Auth Pages
 import VerificationWait from './pages/auth/VerificationWait';
 
-// ## Dashboard Index Component
-// ## Renders the appropriate dashboard based on user role from backend
+/** Maps frontend role (requestor is normalized to recipient in useAuth) to the home dashboard component. */
+const ROLE_DASHBOARD_MAP = {
+  admin: AdminDashboard,
+  ngo: NGODashboard,
+  donor_institution: SupplierDashboard,
+  donor_individual: SupplierDashboard,
+  angel_donor: SupplierDashboard,
+  auditor: ValuationReview,
+  recipient: RecipientDashboard,
+  field_agent: FieldAgentDashboard,
+  driver: AdminDashboard,
+  supervisor: AdminDashboard,
+  special: AdminDashboard,
+};
+
 const DashboardIndex = () => {
-  // ## Get current user role from auth context (already mapped from backend)
   const { role } = useAuth();
-  
-  // ## Return role-specific dashboard component based on backend role
-  if (role === 'admin') {
-    return <AdminDashboard />;
-  } else if (role === 'ngo') {
-    return <NGODashboard />;
-  } else if (role === 'donor_institution') {
-    return <SupplierDashboard />;
-  } else if (role === 'donor_individual') {
-    return <SupplierDashboard />;
-  } else if (role === 'angel_donor') {
-    return <SupplierDashboard />;
-  } else if (role === 'auditor') {
-    return <ValuationReview />;
-  } else if (role === 'recipient' || role === 'requestor') {
-    // Handle both 'recipient' and 'requestor' roles (requestor is backend term)
-    return <RecipientDashboard />;
-  } else if (role === 'field_agent') {
-    return <FieldAgentDashboard />;
-  } else if (role === 'driver' || role === 'supervisor') {
-    return <AdminDashboard />; // Drivers/supervisors see logistics-focused dashboard
-  } else if (role === 'special') {
-    return <AdminDashboard />; // Special roles get dashboard based on permissions
-  } else {
-    // Fallback to recipient dashboard for unknown roles
-    return <RecipientDashboard />;
-  }
+  const DashboardComponent = ROLE_DASHBOARD_MAP[role] ?? RecipientDashboard;
+  return <DashboardComponent />;
 };
 
 const AppRoutes = () => {

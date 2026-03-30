@@ -2,8 +2,8 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
@@ -22,9 +22,11 @@ return new class extends Migration
 
         // Extend status to support closed_no_match and cancelled
         if (DB::getDriverName() === 'pgsql') {
-            DB::statement("ALTER TABLE requests DROP CONSTRAINT IF EXISTS requests_status_check");
-            DB::statement("ALTER TABLE requests ALTER COLUMN status TYPE VARCHAR(50)");
+            DB::statement('ALTER TABLE requests DROP CONSTRAINT IF EXISTS requests_status_check');
+            DB::statement('ALTER TABLE requests ALTER COLUMN status TYPE VARCHAR(50)');
             DB::statement("ALTER TABLE requests ADD CONSTRAINT requests_status_check CHECK (status IN ('pending', 'approved', 'claimed', 'recede_requested', 'completed', 'closed_no_match', 'cancelled'))");
+        } elseif (DB::getDriverName() === 'sqlite') {
+            // SQLite tests: status column is already a string; no MySQL-style MODIFY.
         } else {
             DB::statement("ALTER TABLE requests MODIFY COLUMN status VARCHAR(50) DEFAULT 'pending'");
         }
@@ -40,8 +42,10 @@ return new class extends Migration
         });
 
         if (DB::getDriverName() === 'pgsql') {
-            DB::statement("ALTER TABLE requests DROP CONSTRAINT IF EXISTS requests_status_check");
+            DB::statement('ALTER TABLE requests DROP CONSTRAINT IF EXISTS requests_status_check');
             DB::statement("ALTER TABLE requests ADD CONSTRAINT requests_status_check CHECK (status IN ('pending', 'approved', 'claimed', 'recede_requested', 'completed'))");
+        } elseif (DB::getDriverName() === 'sqlite') {
+            //
         } else {
             DB::statement("ALTER TABLE requests MODIFY COLUMN status ENUM('pending', 'approved', 'claimed', 'recede_requested', 'completed') DEFAULT 'pending'");
         }

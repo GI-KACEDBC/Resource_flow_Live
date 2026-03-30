@@ -44,6 +44,14 @@ class DonationPolicy
         return $user->isAdmin();
     }
 
+    /**
+     * Confirm Paystack reference against dashboard (server uses secret key).
+     */
+    public function verifyMonetaryAsAdmin(User $user, Donation $donation): bool
+    {
+        return $user->isAdmin();
+    }
+
     public function delete(User $user, Donation $donation): bool
     {
         return $user->isAdmin();

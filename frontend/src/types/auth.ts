@@ -1,4 +1,13 @@
-export type UserRole = 'admin' | 'requestor' | 'ngo' | 'donor_institution' | 'donor_individual' | 'angel_donor' | 'auditor' | 'field_agent';
+export type UserRole =
+  | 'admin'
+  | 'finance'
+  | 'requestor'
+  | 'ngo'
+  | 'donor_institution'
+  | 'donor_individual'
+  | 'angel_donor'
+  | 'auditor'
+  | 'field_agent';
 
 import { VulnerabilityScore, Donation, VerificationDocument, Allocation } from './backend';
 
@@ -23,11 +32,16 @@ export interface User {
   allocations?: Allocation[];
   created_at: string;
   updated_at: string;
+  /** Set when Super Admin (email match). */
+  is_super_admin?: boolean;
+  /** Server session: user chose to continue to the app before admin verification completed. */
+  allow_unverified_dashboard_access?: boolean;
 }
 
+/** Laravel Sanctum session auth — no bearer token in body. */
 export interface AuthResponse {
   user: User;
-  token: string;
+  token?: string;
 }
 
 export interface LoginCredentials {
@@ -42,5 +56,14 @@ export interface RegisterData {
   password_confirmation: string;
   role: 'requestor' | 'ngo' | 'donor_institution' | 'donor_individual' | 'angel_donor';
   organization?: string;
+  phone?: string;
+  /** Where the signup OTP was delivered */
+  otp_channel: 'email' | 'sms';
+  otp: string;
+}
+
+export interface SendRegistrationOtpPayload {
+  email: string;
+  otp_channel: 'email' | 'sms';
   phone?: string;
 }

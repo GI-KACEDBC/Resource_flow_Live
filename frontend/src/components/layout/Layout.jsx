@@ -327,14 +327,14 @@ const Layout = () => {
               <StatusBadge
                 status={isVerified ? 'Verified' : 'Pending'}
                 size="sm"
-                variant="dark"
+                variant="light"
               />
             )}
           </div>
 
             <div className="flex items-center gap-6">
             {role !== 'auditor' && (
-              <div className="relative cursor-pointer text-white/70 hover:text-white">
+              <div className="relative cursor-pointer text-black/70 hover:text-black">
                 <Bell size={20} />
                 <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></span>
               </div>
@@ -345,16 +345,14 @@ const Layout = () => {
                 className="flex items-center gap-2 hover:opacity-80 transition"
               >
                 <div className="text-right">
-                  <p className="text-xs font-bold text-white">
-                    {user?.name || 'Demo User'}
-                  </p>
-                  <p className="text-[10px] text-white/60 capitalize">{role} Account</p>
+                  <p className="text-xs font-bold text-black">{user?.name || 'Demo User'}</p>
+                  <p className="text-[10px] capitalize text-black">{role} Account</p>
                 </div>
-                <UserCircle size={32} className="text-white/70" />
+                <UserCircle size={32} className="text-black" />
               </button>
               <button
                 onClick={handleLogout}
-                className="flex items-center gap-2 px-3 py-2 text-red-300 hover:text-red-100 hover:bg-red-500/20 rounded-lg transition border border-red-400/30 hover:border-red-400/50"
+                className="flex items-center gap-2 px-3 py-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition border border-red-200 hover:border-red-300"
                 title="Logout"
               >
                 <LogOut size={18} />

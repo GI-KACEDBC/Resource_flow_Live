@@ -74,3 +74,17 @@ export const parseCurrency = (value: string): number => {
   const cleaned = value.replace(/GH₵/g, '').replace(/\s/g, '').replace(/,/g, '');
   return parseFloat(cleaned) || 0;
 };
+
+/** One line for lists: monetary = GH₵ only; goods/services = qty + unit (no "bags" on cash). */
+export const formatDonationQuantityLine = (d: {
+  type: string;
+  quantity: number | string;
+  unit?: string | null;
+}): string => {
+  const raw = typeof d.quantity === 'string' ? parseFloat(d.quantity) : d.quantity;
+  const q = Number.isFinite(raw) ? raw : 0;
+  if (d.type === 'Monetary') {
+    return formatGHC(q);
+  }
+  return `${q.toLocaleString('en-GH')} ${d.unit || ''}`.trim();
+};

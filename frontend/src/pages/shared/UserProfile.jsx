@@ -5,7 +5,37 @@ import { User, Package, ShieldCheck, CheckCircle, Clock, FileText, TrendingUp, M
 import { useAuth } from '../../hooks/useAuth';
 import { authApi, donationApi, verificationDocumentApi, allocationApi, vulnerabilityScoreApi } from '../../services/api';
 import { StatusBadge } from '../../components/shared/StatusBadge';
-import { formatGHC } from '../../utils/currency';
+import { formatDonationQuantityLine, formatGHC } from '../../utils/currency';
+
+/** API returns all rows scoped by role; profile must not filter admin/donor rows like a recipient-only view. */
+function filterAllocationsForUser(allocationsData, authUser) {
+  if (!Array.isArray(allocationsData) || !authUser?.id) return [];
+  const role = authUser.role;
+  if (role === 'admin' || role === 'auditor') {
+    return allocationsData;
+  }
+  if (role === 'recipient' || role === 'requestor') {
+    return allocationsData.filter((a) => a.request?.user?.id === authUser.id);
+  }
+  if (['donor_individual', 'donor_institution', 'angel_donor'].includes(role)) {
+    return allocationsData.filter((a) => a.donation?.user_id === authUser.id);
+  }
+  return allocationsData.filter(
+    (a) =>
+      a.request?.user?.id === authUser.id ||
+      a.donation?.user_id === authUser.id ||
+      a.allocated_by === authUser.id
+  );
+}
+
+function allocationsSectionTitle(role) {
+  if (role === 'admin' || role === 'auditor') return 'Allocations';
+  if (role === 'recipient' || role === 'requestor') return 'Allocations received';
+  if (['donor_individual', 'donor_institution', 'angel_donor'].includes(role)) {
+    return 'Allocations from my donations';
+  }
+  return 'Allocations';
+}
 
 const UserProfile = () => {
   const { user: authUser } = useAuth();
@@ -42,7 +72,7 @@ const UserProfile = () => {
       setUserData(userInfo);
       setDonations(donationsData);
       setDocuments(documentsData);
-      setAllocations(allocationsData.filter(a => a.request?.user?.id === authUser.id));
+      setAllocations(filterAllocationsForUser(allocationsData, authUser));
       setVulnerabilityScore(scoreData);
     } catch (error) {
       console.error('Error loading user data:', error);
@@ -318,7 +348,7 @@ const UserProfile = () => {
                     <div>
                       <p className="font-semibold text-slate-800">{donation.item}</p>
                       <p className="text-sm text-slate-600">
-                        {donation.quantity} {donation.unit} • {donation.type}
+                        {formatDonationQuantityLine(donation)} • {donation.type}
                       </p>
                     </div>
                     <StatusBadge status={donation.status} />
@@ -328,30 +358,51 @@ const UserProfile = () => {
             )}
           </div>
 
-          {/* Allocations */}
-          {allocations.length > 0 && (
-            <div className="bg-white border border-slate-200 rounded-xl p-6">
-              <h4 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
-                <CheckCircle size={18} />
-                Allocations Received ({allocations.length})
-              </h4>
+          {/* Allocations — role-aware list (admin/auditor see all; recipients see received; donors see from their donations) */}
+          <div className="bg-white border border-slate-200 rounded-xl p-6">
+            <h4 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
+              <CheckCircle size={18} />
+              {allocationsSectionTitle(authUser?.role)} ({allocations.length})
+            </h4>
+            {allocations.length === 0 ? (
+              <p className="text-sm text-slate-500">
+                {authUser?.role === 'admin' || authUser?.role === 'auditor'
+                  ? 'No allocation records yet.'
+                  : ['donor_individual', 'donor_institution', 'angel_donor'].includes(authUser?.role)
+                    ? 'None of your donations have been allocated yet.'
+                    : authUser?.role === 'recipient' || authUser?.role === 'requestor'
+                      ? 'No allocations received yet.'
+                      : 'No allocations to show.'}
+              </p>
+            ) : (
               <div className="space-y-3">
                 {allocations.slice(0, 5).map((allocation) => (
                   <div key={allocation.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
                     <div>
                       <p className="font-semibold text-slate-800">
-                        {allocation.request?.title || 'Request'}
+                        {['donor_individual', 'donor_institution', 'angel_donor'].includes(authUser?.role)
+                          ? allocation.donation?.item || 'Donation'
+                          : allocation.request?.title || 'Request'}
                       </p>
                       <p className="text-sm text-slate-600">
-                        {allocation.quantity_allocated} {allocation.donation?.unit || 'units'}
+                        {allocation.donation
+                          ? formatDonationQuantityLine({
+                              type: allocation.donation.type,
+                              quantity: allocation.quantity_allocated,
+                              unit: allocation.donation.unit,
+                            })
+                          : `${allocation.quantity_allocated} units`}
+                        {['admin', 'auditor'].includes(authUser?.role) && allocation.request?.title && (
+                          <span className="text-slate-500"> · {allocation.request.title}</span>
+                        )}
                       </p>
                     </div>
                     <StatusBadge status={allocation.status} />
                   </div>
                 ))}
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </div>

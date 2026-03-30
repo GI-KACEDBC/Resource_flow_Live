@@ -5,13 +5,17 @@ namespace App\Providers;
 use App\Models\Allocation;
 use App\Models\DeliveryRoute;
 use App\Models\Donation;
+use App\Models\Financial;
 use App\Models\Logistic;
+use App\Models\Project;
 use App\Models\Trip;
 use App\Observers\DeliveryRouteObserver;
 use App\Policies\AllocationPolicy;
 use App\Policies\DeliveryRoutePolicy;
 use App\Policies\DonationPolicy;
+use App\Policies\FinancialPolicy;
 use App\Policies\LogisticPolicy;
+use App\Policies\ProjectPolicy;
 use App\Policies\TripPolicy;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -27,9 +31,11 @@ class AppServiceProvider extends ServiceProvider
     protected $policies = [
         DeliveryRoute::class => DeliveryRoutePolicy::class,
         Donation::class => DonationPolicy::class,
+        Financial::class => FinancialPolicy::class,
         Allocation::class => AllocationPolicy::class,
         Logistic::class => LogisticPolicy::class,
         Trip::class => TripPolicy::class,
+        Project::class => ProjectPolicy::class,
     ];
 
     /**
@@ -65,4 +71,3 @@ class AppServiceProvider extends ServiceProvider
         });
     }
 }
-

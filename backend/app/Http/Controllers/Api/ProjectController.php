@@ -68,6 +68,7 @@ class ProjectController extends Controller
             'sdg_goals' => $validated['sdg_goals'] ?? [],
             'budget' => $targetAmount,
             'target_amount' => $targetAmount,
+            'estimated_total_value' => $targetAmount,
             'location' => $validated['location'] ?? null,
             'location_gps' => $validated['location_gps'] ?? null,
             'cover_photo_path' => $validated['cover_photo_path'] ?? null,
@@ -96,7 +97,16 @@ class ProjectController extends Controller
 
     public function show($id): JsonResponse
     {
-        $project = Project::with(['ngo', 'organization', 'verifier', 'projectBudgets', 'projectItems', 'csrPartnerships.corporate'])
+        $project = Project::with([
+            'ngo',
+            'organization',
+            'verifier',
+            'projectBudgets',
+            'projectItems',
+            'csrPartnerships.corporate',
+            'adminValueVerifier',
+            'auditorValueVerifier',
+        ])
             ->findOrFail($id);
         return response()->json($project);
     }
@@ -145,7 +155,7 @@ class ProjectController extends Controller
             return response()->json(['message' => 'Only draft projects can be submitted.'], 422);
         }
 
-        $targetAmount = $project->projectBudgets->sum('total_cost');
+        $targetAmount = (float) $project->projectBudgets->sum('total_cost');
         $org = $user->organization;
 
         if ($targetAmount > 5000 && (!$org || !$org->canPublishLargeProject($targetAmount))) {
@@ -154,10 +164,79 @@ class ProjectController extends Controller
             ], 422);
         }
 
-        $project->update(['status' => 'pending_approval']);
+        $project->update([
+            'status' => 'pending_approval',
+            'estimated_total_value' => $targetAmount,
+            'target_amount' => $targetAmount,
+            'budget' => $targetAmount,
+        ]);
         return response()->json([
             'message' => 'Project submitted for approval',
             'project' => $project->fresh(['ngo', 'projectBudgets']),
+        ]);
+    }
+
+    /**
+     * Admin: after reviewing project documents, set the verified funding ceiling (GHS).
+     */
+    public function verifyFundingCeilingAdmin(Request $request, Project $project): JsonResponse
+    {
+        $this->authorize('verifyFundingCeilingAdmin', $project);
+
+        $validated = $request->validate([
+            'verified_ceiling_ghs' => 'required|numeric|min:0.01',
+            'notes' => 'nullable|string|max:2000',
+        ]);
+
+        $project->update([
+            'verified_ceiling_ghs' => $validated['verified_ceiling_ghs'],
+            'admin_verified_value_at' => now(),
+            'admin_verified_value_by' => $request->user()->id,
+            'admin_value_notes' => $validated['notes'] ?? null,
+        ]);
+
+        return response()->json([
+            'message' => 'Funding ceiling recorded. An auditor must confirm before project funding is enabled.',
+            'project' => $project->fresh(['ngo', 'organization', 'projectBudgets', 'adminValueVerifier', 'auditorValueVerifier']),
+        ]);
+    }
+
+    /**
+     * Auditor: confirm the funding ceiling (optionally adjust verified_ceiling_ghs).
+     */
+    public function verifyFundingCeilingAuditor(Request $request, Project $project): JsonResponse
+    {
+        $this->authorize('verifyFundingCeilingAuditor', $project);
+
+        if (! $project->admin_verified_value_at) {
+            return response()->json([
+                'message' => 'An administrator must verify the funding ceiling before the auditor can confirm.',
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'verified_ceiling_ghs' => 'nullable|numeric|min:0.01',
+            'notes' => 'nullable|string|max:2000',
+        ]);
+
+        $ceiling = isset($validated['verified_ceiling_ghs'])
+            ? (float) $validated['verified_ceiling_ghs']
+            : (float) $project->verified_ceiling_ghs;
+
+        if ($ceiling <= 0) {
+            return response()->json(['message' => 'verified_ceiling_ghs must be positive.'], 422);
+        }
+
+        $project->update([
+            'verified_ceiling_ghs' => $ceiling,
+            'auditor_verified_value_at' => now(),
+            'auditor_verified_value_by' => $request->user()->id,
+            'auditor_value_notes' => $validated['notes'] ?? null,
+        ]);
+
+        return response()->json([
+            'message' => 'Funding ceiling confirmed. Project funding is capped at the verified amount.',
+            'project' => $project->fresh(['ngo', 'organization', 'projectBudgets', 'adminValueVerifier', 'auditorValueVerifier']),
         ]);
     }
 }
