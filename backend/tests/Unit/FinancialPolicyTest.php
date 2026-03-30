@@ -90,6 +90,50 @@ class FinancialPolicyTest extends TestCase
         $this->assertFalse($policy->viewStatistics($user));
     }
 
+    public function test_auditor_can_view_statistics(): void
+    {
+        $user = new User(['role' => User::ROLE_AUDITOR]);
+
+        $policy = new FinancialPolicy;
+
+        $this->assertTrue($policy->viewStatistics($user));
+    }
+
+    public function test_auditor_can_view_any_financial_row(): void
+    {
+        $user = new User(['role' => User::ROLE_AUDITOR]);
+        $user->id = 1;
+
+        $financial = new Financial(['user_id' => 999]);
+
+        $policy = new FinancialPolicy;
+
+        $this->assertTrue($policy->view($user, $financial));
+    }
+
+    public function test_auditor_cannot_update_financial_row(): void
+    {
+        $user = new User(['role' => User::ROLE_AUDITOR]);
+        $user->id = 1;
+
+        $financial = new Financial(['user_id' => 5]);
+
+        $policy = new FinancialPolicy;
+
+        $this->assertFalse($policy->update($user, $financial));
+    }
+
+    public function test_auditor_cannot_delete_financial_row(): void
+    {
+        $user = new User(['role' => User::ROLE_AUDITOR]);
+
+        $financial = new Financial(['user_id' => 5]);
+
+        $policy = new FinancialPolicy;
+
+        $this->assertFalse($policy->delete($user, $financial));
+    }
+
     public function test_donor_cannot_create_financial_records(): void
     {
         $user = new User(['role' => 'donor_individual']);

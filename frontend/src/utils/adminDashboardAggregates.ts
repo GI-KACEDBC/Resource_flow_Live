@@ -14,8 +14,25 @@ export function isDonationReceivedForDashboard(d: Donation): boolean {
   return DONATION_RECEIVED_STATUSES.includes(d.status);
 }
 
-function isCompletedLedgerInflow(f: Financial): boolean {
+/** Completed Paystack / cash rows that count as inflows (for ledger sums and deduplication). */
+export function isCompletedLedgerInflow(f: Financial): boolean {
   return f.status === 'Completed' && FINANCIAL_INFLOW_TYPES.includes(f.transaction_type);
+}
+
+/**
+ * Distinct receipt events matching {@link computeDonationsReceivedGhs} (donation lines + orphan ledger rows).
+ */
+export function countReceivedPipelineEvents(donations: Donation[], financials: Financial[]): number {
+  let n = 0;
+  for (const d of donations) {
+    if (donationCountsAsReceived(d, financials)) n++;
+  }
+  for (const f of financials) {
+    if (isCompletedLedgerInflow(f) && (f.donation_id == null || Number(f.donation_id) === 0)) {
+      n++;
+    }
+  }
+  return n;
 }
 
 /** Monetary row still Pending but Paystack (or admin) already recorded a completed ledger line. */

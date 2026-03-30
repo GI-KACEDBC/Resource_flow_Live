@@ -136,10 +136,10 @@ class User extends Authenticatable
         return $this->role === 'finance';
     }
 
-    /** Whether this user may list all financial rows (Super Admin only). */
+    /** Whether this user may list all financial rows (Super Admin + read-only auditor). */
     public function canListAllFinancialRecords(): bool
     {
-        return $this->isSuperAdmin();
+        return $this->isSuperAdmin() || $this->isAuditor();
     }
 
     /** Super Admin is the single account that can create Admin and Staff users. */

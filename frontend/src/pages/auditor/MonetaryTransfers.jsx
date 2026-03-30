@@ -13,14 +13,19 @@ import {
   FileText,
   Loader2,
 } from 'lucide-react';
-import { financialApi } from '../../services/api';
+import { donationApi, financialApi } from '../../services/api';
 import { formatGHC } from '../../utils/currency';
+import {
+  computeDonationsReceivedGhs,
+  countReceivedPipelineEvents,
+} from '../../utils/adminDashboardAggregates';
 import { downloadCsv } from '../../utils/exportCsv';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 
 const MonetaryTransfers = () => {
   const [financials, setFinancials] = useState([]);
+  const [donations, setDonations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -29,18 +34,23 @@ const MonetaryTransfers = () => {
   const [paymentMethodFilter, setPaymentMethodFilter] = useState('all');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
 
-  // ## Fetch financials from API
+  // ## Fetch ledger + donations (same pipeline total as admin overview — avoids counting only raw ledger rows)
   useEffect(() => {
     const fetchFinancials = async () => {
       try {
         setLoading(true);
         setError(null);
-        const data = await financialApi.getAll();
-        setFinancials(Array.isArray(data) ? data : []);
+        const [financialData, donationData] = await Promise.all([
+          financialApi.getAll(),
+          donationApi.getAll().catch(() => []),
+        ]);
+        setFinancials(Array.isArray(financialData) ? financialData : []);
+        setDonations(Array.isArray(donationData) ? donationData : []);
       } catch (err) {
         console.error('Error fetching financials:', err);
         setError('Failed to load payment transactions.');
         setFinancials([]);
+        setDonations([]);
       } finally {
         setLoading(false);
       }
@@ -64,15 +74,23 @@ const MonetaryTransfers = () => {
     return 'other';
   };
 
-  // ## Compute stats from financials
+  // ## Stats: headline GHS matches admin `computeDonationsReceivedGhs` (donations + orphan ledger; no double-count)
   const stats = useMemo(() => {
     const completed = financials.filter((f) => f.status === 'Completed');
+    const pipelineTotalGhs = computeDonationsReceivedGhs(donations, financials);
+    const receiptEvents = countReceivedPipelineEvents(donations, financials);
+    const ledgerCashCompleted = completed
+      .filter((f) => ['Donation', 'Project Funding', 'General Support'].includes(f.transaction_type))
+      .reduce((sum, f) => sum + (f.amount || 0), 0);
     return {
       total: financials.length,
+      receiptEvents,
       successful: completed.length,
       failed: financials.filter((f) => f.status === 'Failed' || f.status === 'Refunded').length,
       pending: financials.filter((f) => f.status === 'Pending').length,
-      totalAmount: completed.reduce((sum, f) => sum + (f.amount || 0), 0),
+      /** Same figure as admin overview "Donation records + ledger inflows" */
+      totalAmount: pipelineTotalGhs,
+      ledgerCashCompleted,
       totalGeneral:
         completed
           .filter((f) => ['Donation', 'General Support'].includes(f.transaction_type))
@@ -81,11 +99,10 @@ const MonetaryTransfers = () => {
         completed
           .filter((f) => f.transaction_type === 'Project Funding')
           .reduce((sum, f) => sum + (f.amount || 0), 0),
-      averageAmount: completed.length > 0
-        ? completed.reduce((sum, f) => sum + (f.amount || 0), 0) / completed.length
-        : 0,
+      averageAmount:
+        receiptEvents > 0 ? pipelineTotalGhs / receiptEvents : 0,
     };
-  }, [financials]);
+  }, [financials, donations]);
 
   // ## Filter financials
   const filteredPayments = useMemo(() => {
@@ -208,22 +225,27 @@ const MonetaryTransfers = () => {
         </Button>
       </div>
 
-      {/* Statistics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+      {/* Statistics Cards — headline GHS matches admin overview (donations + ledger, deduped; not a raw sum of ledger rows). */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
         <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <p className="text-sm text-slate-600">Total Transactions</p>
-          <p className="text-xl font-bold text-slate-800 mt-1">{stats.total}</p>
-        </div>
-        <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <p className="text-sm text-slate-600">Successful</p>
-          <p className="text-xl font-bold text-emerald-600 mt-1">{stats.successful}</p>
-        </div>
-        <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <p className="text-sm text-slate-600">Total Amount</p>
+          <p className="text-sm text-slate-600">Total received (GHS)</p>
           <p className="text-xl font-bold text-slate-800 mt-1">{formatGHC(stats.totalAmount)}</p>
+          <p className="text-xs text-slate-500 mt-1">Same pipeline as admin dashboard.</p>
         </div>
         <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <p className="text-sm text-slate-600">Average Amount</p>
+          <p className="text-sm text-slate-600">Ledger cash (completed)</p>
+          <p className="text-xl font-bold text-slate-800 mt-1">{formatGHC(stats.ledgerCashCompleted)}</p>
+          <p className="text-xs text-slate-500 mt-1">Sum of completed inflow rows only (excludes goods value on donations).</p>
+        </div>
+        <div className="bg-white border border-slate-200 rounded-xl p-4">
+          <p className="text-sm text-slate-600">Ledger rows / receipt events</p>
+          <p className="text-xl font-bold text-slate-800 mt-1">
+            {stats.total} / {stats.receiptEvents}
+          </p>
+          <p className="text-xs text-slate-500 mt-1">{stats.successful} completed on ledger</p>
+        </div>
+        <div className="bg-white border border-slate-200 rounded-xl p-4">
+          <p className="text-sm text-slate-600">Avg. per receipt event</p>
           <p className="text-xl font-bold text-blue-600 mt-1">{formatGHC(stats.averageAmount)}</p>
         </div>
       </div>

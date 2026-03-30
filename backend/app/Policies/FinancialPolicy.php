@@ -16,11 +16,15 @@ class FinancialPolicy
     }
 
     /**
-     * Only the ledger row owner or Super Admin may view a single record.
+     * Ledger row owner, Super Admin, or Auditor (read-only) may view a single record.
      */
     public function view(User $user, Financial $financial): bool
     {
         if ($user->isSuperAdmin()) {
+            return true;
+        }
+
+        if ($user->isAuditor()) {
             return true;
         }
 
@@ -37,19 +41,27 @@ class FinancialPolicy
 
     public function update(User $user, Financial $financial): bool
     {
+        if ($user->isAuditor()) {
+            return false;
+        }
+
         return $this->view($user, $financial);
     }
 
     public function delete(User $user, Financial $financial): bool
     {
+        if ($user->isAuditor()) {
+            return false;
+        }
+
         return $this->view($user, $financial);
     }
 
     /**
-     * Aggregated org metrics: admins or Super Admin (not plain donors/recipients).
+     * Aggregated org metrics: admins, Super Admin, or auditor (same cash KPIs as admin dashboards).
      */
     public function viewStatistics(User $user): bool
     {
-        return $user->isAdmin() || $user->isSuperAdmin();
+        return $user->isAdmin() || $user->isSuperAdmin() || $user->isAuditor();
     }
 }
